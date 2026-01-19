@@ -1,7 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
-import { X, Users, Activity, Trash2, Search, ShieldAlert } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Users, Activity, Trash2, Search, ShieldAlert, HardDrive, Download, Upload, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
 import { AuthService } from '../services/authService';
+import { StorageService } from '../services/storageService';
 import { User, AuditLog } from '../types';
 
 interface AdminDashboardProps {
@@ -10,10 +11,15 @@ interface AdminDashboardProps {
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'logs' | 'users'>('logs');
+  const [activeTab, setActiveTab] = useState<'logs' | 'users' | 'system'>('logs');
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Backup State
+  const [isBackupLoading, setIsBackupLoading] = useState(false);
+  const [backupStatus, setBackupStatus] = useState('');
+  const restoreInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     refreshData();
@@ -22,7 +28,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
   const refreshData = async () => {
     if (activeTab === 'logs') {
         setLogs(await AuthService.getLogs());
-    } else {
+    } else if (activeTab === 'users') {
         setUsers(await AuthService.getUsers());
     }
   };
@@ -36,6 +42,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
               alert("删除失败：无法删除管理员或自身。");
           }
       }
+  };
+
+  const handleBackup = async () => {
+      try {
+          setIsBackupLoading(true);
+          setBackupStatus('正在从云端下载数据...');
+          const data = await StorageService.createBackup();
+          
+          // Create Blob and Download
+          const jsonString = JSON.stringify(data, null, 2);
+          const blob = new Blob([jsonString], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `travel_builder_backup_${new Date().toISOString().split('T')[0]}.json`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          setBackupStatus('✅ 备份下载成功');
+          setTimeout(() => setBackupStatus(''), 3000);
+      } catch (e) {
+          console.error(e);
+          setBackupStatus('❌ 备份失败，请检查网络');
+      } finally {
+          setIsBackupLoading(false);
+      }
+  };
+
+  const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      if (!window.confirm("警告：恢复操作将覆盖当前云端的同名数据。\n建议先进行一次备份。\n\n是否继续？")) {
+          if(restoreInputRef.current) restoreInputRef.current.value = '';
+          return;
+      }
+
+      setIsBackupLoading(true);
+      setBackupStatus('正在读取文件...');
+
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+          try {
+              const json = JSON.parse(evt.target?.result as string);
+              if (!Array.isArray(json)) throw new Error("Invalid format");
+              
+              setBackupStatus('正在上传至云端...');
+              await StorageService.restoreBackup(json);
+              
+              setBackupStatus('✅ 恢复成功！请刷新页面以加载新数据。');
+              setTimeout(() => window.location.reload(), 2000);
+          } catch (e) {
+              console.error(e);
+              setBackupStatus('❌ 恢复失败：文件格式错误或网络中断');
+          } finally {
+              setIsBackupLoading(false);
+              if(restoreInputRef.current) restoreInputRef.current.value = '';
+          }
+      };
+      reader.readAsText(file);
   };
 
   const filteredLogs = logs.filter(l => 
@@ -72,26 +139,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
                 >
                     <Users size={16}/> 用户管理
                 </button>
+                <button 
+                    onClick={() => setActiveTab('system')}
+                    className={`px-6 py-3 text-sm font-medium text-left flex items-center gap-2 ${activeTab === 'system' ? 'bg-white border-r-2 border-blue-600 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+                >
+                    <HardDrive size={16}/> 系统维护
+                </button>
             </div>
 
             {/* Content */}
             <div className="flex-1 flex flex-col bg-white">
-                <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                    <h4 className="font-bold text-gray-700">{activeTab === 'logs' ? '系统操作日志' : '注册用户列表'}</h4>
-                    <div className="relative">
-                        <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400"/>
-                        <input 
-                            type="text" 
-                            className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                            placeholder="搜索..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
+                {activeTab !== 'system' && (
+                    <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                        <h4 className="font-bold text-gray-700">{activeTab === 'logs' ? '系统操作日志' : '注册用户列表'}</h4>
+                        <div className="relative">
+                            <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400"/>
+                            <input 
+                                type="text" 
+                                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="搜索..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
                     </div>
-                </div>
+                )}
 
                 <div className="flex-1 overflow-auto p-4">
-                    {activeTab === 'logs' ? (
+                    {activeTab === 'logs' && (
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
                                 <tr>
@@ -126,7 +201,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
                                 ))}
                             </tbody>
                         </table>
-                    ) : (
+                    )}
+
+                    {activeTab === 'users' && (
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
                                 <tr>
@@ -163,6 +240,79 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
                                 ))}
                             </tbody>
                         </table>
+                    )}
+
+                    {activeTab === 'system' && (
+                        <div className="max-w-3xl mx-auto py-8">
+                            <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                                <HardDrive size={24} className="text-blue-600"/> 数据备份与恢复
+                            </h2>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                {/* Backup Card */}
+                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 shadow-sm">
+                                    <div className="flex items-center gap-3 mb-4">
+                                        <div className="p-3 bg-blue-100 text-blue-600 rounded-full">
+                                            <Download size={24}/>
+                                        </div>
+                                        <div>
+                                            <h3 className="font-bold text-gray-800">全量备份 (Export)</h3>
+                                            <p className="text-sm text-gray-500">下载当前云端所有数据</p>
+                                        </div>
+                                    </div>
+                                    <p className="text-sm text-gray-600 mb-6 min-h-[40px]">
+                                        将当前的行程库、资源库、用户配置等所有数据打包下载为 JSON 文件。建议在版本更新前执行。
+                                    </p>
+                                    <button 
+                                        onClick={handleBackup} 
+                                        disabled={isBackupLoading}
+                                        className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                                    >
+                                        {isBackupLoading ? <Loader2 className="animate-spin"/> : <Download size={18}/>}
+                                        开始备份
+                                    </button>
+                                </div>
+
+                                {/* Restore Card */}
+                                <div className="bg-orange-50 border border-orange-200 rounded-xl p-6 shadow-sm">
+                                    <div className="flex items-center gap-3 mb-4">
+                                        <div className="p-3 bg-orange-100 text-orange-600 rounded-full">
+                                            <Upload size={24}/>
+                                        </div>
+                                        <div>
+                                            <h3 className="font-bold text-gray-800">数据恢复 (Restore)</h3>
+                                            <p className="text-sm text-gray-500">上传备份文件覆盖云端</p>
+                                        </div>
+                                    </div>
+                                    <p className="text-sm text-gray-600 mb-6 min-h-[40px]">
+                                        <AlertTriangle size={14} className="inline mr-1 text-orange-500"/>
+                                        警告：此操作将使用备份文件中的数据<span className="font-bold text-red-600">覆盖</span>当前云端数据库。请谨慎操作。
+                                    </p>
+                                    <input 
+                                        type="file" 
+                                        ref={restoreInputRef}
+                                        accept=".json"
+                                        onChange={handleRestore}
+                                        className="hidden"
+                                    />
+                                    <button 
+                                        onClick={() => restoreInputRef.current?.click()} 
+                                        disabled={isBackupLoading}
+                                        className="w-full py-2.5 bg-white border border-orange-300 text-orange-700 font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-orange-100 transition-colors disabled:opacity-50"
+                                    >
+                                        {isBackupLoading ? <Loader2 className="animate-spin"/> : <Upload size={18}/>}
+                                        选择备份文件
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Status Bar */}
+                            {backupStatus && (
+                                <div className="mt-8 p-4 bg-gray-100 rounded-lg flex items-center justify-center gap-2 animate-fade-in">
+                                    <span className="font-medium text-gray-700">{backupStatus}</span>
+                                </div>
+                            )}
+                        </div>
                     )}
                 </div>
             </div>

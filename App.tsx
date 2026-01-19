@@ -12,15 +12,14 @@ import { AuthModal } from './components/AuthModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { addDays, generateUUID } from './utils/dateUtils';
 import { suggestHotels, generateFileName, generateComprehensiveItinerary, ItineraryItem } from './services/geminiService';
-import { generateSeedData, generateSeedTrips } from './utils/seedData';
+// Removed auto-seeding import usage here, only used in ResourceDB manually now
+import { generateSeedData } from './utils/seedData';
 import { AuthService } from './services/authService';
 import { StorageService } from './services/storageService';
 import { SupabaseManager, SupabaseConfig } from './services/supabaseClient';
 
 // Constants
 const INITIAL_ROWS = 8;
-const STORAGE_KEY_INITIALIZED = 'travel_builder_initialized_v2';
-const STORAGE_KEY_COL_WIDTHS = 'travel_builder_col_widths_v1';
 
 export default function App() {
   // --- Auth State ---
@@ -102,30 +101,12 @@ export default function App() {
   // AI State
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Column Width State
-  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
-     try {
-         const saved = localStorage.getItem(STORAGE_KEY_COL_WIDTHS);
-         return saved ? JSON.parse(saved) : {
-            day: 48,
-            date: 110,
-            route: 180, // Changed from origin/destination
-            transport: 140,
-            hotel: 140,
-            ticket: 140,
-            activity: 140,
-            description: 250,
-            rooms: 50,
-            transportCost: 90,
-            hotelPrice: 90,
-            hotelCost: 90,
-            ticketCost: 90,
-            activityCost: 90,
-            otherCost: 90
-         };
-     } catch (e) {
-         return {};
-     }
+  // Column Width State (Initialized Empty, Loaded from Cloud)
+  const [colWidths, setColWidths] = useState<Record<string, number>>({
+      day: 48, date: 110, route: 180, transport: 140, hotel: 140, 
+      ticket: 140, activity: 140, description: 250, rooms: 50, 
+      transportCost: 90, hotelPrice: 90, hotelCost: 90, 
+      ticketCost: 90, activityCost: 90, otherCost: 90
   });
 
   // --- Calculations ---
@@ -159,9 +140,12 @@ export default function App() {
 
   const loadCloudData = async () => {
       try {
+            // Ensure Admin Profile exists in public list
+            await StorageService.ensureAdminProfile();
+
             // Load all data concurrently
             const [
-                cars, cities, spots, hotels, activities, files, trips, locs
+                cars, cities, spots, hotels, activities, files, trips, locs, settings
             ] = await Promise.all([
                 StorageService.getCars(),
                 StorageService.getCities(),
@@ -170,16 +154,12 @@ export default function App() {
                 StorageService.getActivities(),
                 StorageService.getFiles(),
                 StorageService.getTrips(),
-                StorageService.getLocations()
+                StorageService.getLocations(),
+                StorageService.getAppSettings()
             ]);
 
-            // If completely empty in Cloud, we might assume it's a fresh DB. 
-            // We can prompt to seed, or just leave empty. 
-            // For better UX, we Seed if trips are empty (assuming new user)
-            if (trips.length === 0 && cities.length === 0) {
-                 // Seed logic could go here if we want automatic seeding on fresh cloud DB
-            }
-
+            // NOTE: Auto-seeding removed as per request. Cloud DB starts empty.
+            
             setCarDB(cars);
             setPoiCities(cities);
             setPoiSpots(spots);
@@ -188,6 +168,12 @@ export default function App() {
             setCountryFiles(files);
             setSavedTrips(trips);
             setLocationHistory(locs);
+            
+            // Load Settings
+            if (settings && Object.keys(settings).length > 0) {
+                setColWidths(settings);
+            }
+
             setCloudStatus('synced');
       } catch (e) {
           console.error("Load failed", e);
@@ -195,7 +181,7 @@ export default function App() {
       }
   };
 
-  // 2. Debounced Cloud Sync for Resource DB
+  // 2. Debounced Cloud Sync for Resource DB & Settings
   const useDebouncedSave = (data: any, saver: (d: any) => Promise<void>, delay = 1500) => {
       const firstRun = useRef(true);
       useEffect(() => {
@@ -218,9 +204,8 @@ export default function App() {
   useDebouncedSave(countryFiles, StorageService.saveFiles);
   useDebouncedSave(savedTrips, StorageService.saveTrips);
   useDebouncedSave(locationHistory, StorageService.saveLocations);
-
-  // 3. Local UI Preferences Sync
-  useEffect(() => { localStorage.setItem(STORAGE_KEY_COL_WIDTHS, JSON.stringify(colWidths)); }, [colWidths]);
+  // Also sync colWidths to Cloud!
+  useDebouncedSave(colWidths, StorageService.saveAppSettings);
 
 
   // --- Helper Functions (Same as before) ---
@@ -630,6 +615,9 @@ create policy "Public Access" on app_data for all using (true) with check (true)
                          <span className="text-xs font-bold text-gray-700">{currentUser.username}</span>
                          {/* Removed Admin Dashboard for regular user context in this demo unless role persists */}
                          <button onClick={handleLogout} className="ml-2 text-gray-400 hover:text-red-500"><LogOut size={12}/></button>
+                         {currentUser.role === 'admin' && (
+                             <button onClick={() => setShowAdminDashboard(true)} className="ml-2 text-blue-600 hover:text-blue-800 font-medium text-xs"><ShieldAlert size={14}/></button>
+                         )}
                      </div>
                  ) : (
                      <button onClick={() => setShowAuthModal(true)} className="mr-4 text-xs font-medium text-blue-600 hover:underline">

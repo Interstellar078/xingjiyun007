@@ -1,45 +1,47 @@
 
 import { User, AuditLog, UserRole } from '../types';
-import { generateUUID } from '../utils/dateUtils';
 import { SupabaseManager } from './supabaseClient';
-
-// We map Supabase User to our App User type
-// We store 'role' in user_metadata
+import { StorageService } from './storageService';
 
 export const AuthService = {
     init: async () => {
-        // No-op for Supabase usually, session is auto-restored
-        const client = SupabaseManager.getClient();
-        if(!client) return;
+        // No-op for Supabase usually
     },
 
     // --- User Management ---
-    
-    // In a real app, listing all users requires Admin API or a specific public table.
-    // For simplicity here, we might not be able to "list all users" easily without server-side code.
-    // We will stub this or use a workaround if we had a 'profiles' table.
     getUsers: async (): Promise<User[]> => {
-        // Implementation limitation: Client-side cannot list all users securely by default.
-        // We will return empty or just current user for now to prevent errors.
-        return [];
+        // Now fetches real list from DB
+        return await StorageService.getUserProfiles();
     },
 
     register: async (username: string, password: string): Promise<{ success: boolean, message: string }> => {
         const client = SupabaseManager.getClient();
         if (!client) return { success: false, message: '未连接云端服务' };
 
-        // We use email for Supabase, so we append a fake domain if username is simple
         const email = username.includes('@') ? username : `${username}@example.com`;
 
+        // 1. Create Auth User
         const { data, error } = await client.auth.signUp({
             email,
             password,
             options: {
-                data: { username, role: 'user' } // Default role
+                data: { username, role: 'user' }
             }
         });
 
         if (error) return { success: false, message: error.message };
+
+        // 2. Create Public Profile Record (for Admin Dashboard listing)
+        if (data.user) {
+            const newUser: User = {
+                username: username,
+                password: '', // Don't store password
+                role: 'user',
+                createdAt: Date.now()
+            };
+            await StorageService.saveUserProfile(newUser);
+        }
+
         return { success: true, message: '注册成功！' };
     },
 
@@ -49,19 +51,47 @@ export const AuthService = {
 
         const email = username.includes('@') ? username : `${username}@example.com`;
 
+        // Attempt normal login
         const { data, error } = await client.auth.signInWithPassword({
             email,
             password
         });
 
+        // --- Admin Bootstrap Logic ---
+        // If login failed, but credentials match the seed admin, try to create it on the fly.
+        if (error && username === 'admin' && password === 'liuwen') {
+            console.log("Attempting to bootstrap Admin account...");
+            const { data: signUpData, error: signUpError } = await client.auth.signUp({
+                email,
+                password,
+                options: { data: { username: 'admin', role: 'admin' } }
+            });
+
+            if (!signUpError && signUpData.user) {
+                const adminUser: User = {
+                    username: 'admin',
+                    password: '',
+                    role: 'admin',
+                    createdAt: Date.now()
+                };
+                await StorageService.saveUserProfile(adminUser);
+                return { success: true, user: adminUser, message: '管理员账户初始化成功' };
+            }
+        }
+        // -----------------------------
+
         if (error) return { success: false, message: '用户名或密码错误' };
+        
         if (data.user) {
             const user: User = {
                 username: data.user.user_metadata.username || email,
-                password: '', // Don't store
+                password: '',
                 role: (data.user.user_metadata.role as UserRole) || 'user',
                 createdAt: new Date(data.user.created_at).getTime()
             };
+            // Ensure profile exists in DB (sync fix for old users)
+            await StorageService.saveUserProfile(user);
+            
             return { success: true, user, message: '登录成功' };
         }
         return { success: false, message: '未知错误' };
@@ -89,17 +119,14 @@ export const AuthService = {
     },
 
     deleteUser: async (username: string, operator: User): Promise<boolean> => {
-        // Stub implementation for client-side demo
-        console.log(`User ${operator.username} requesting delete of ${username}`);
         if(operator.role !== 'admin') return false;
-        // In real app: Call backend function or use service role
+        // Only deletes the public profile for display. 
+        // Cannot delete Auth User from client side without Service Key.
+        await StorageService.deleteUserProfile(username);
         return true;
     },
 
-    // --- Audit Logging (Cloud Table) ---
-    // We assume a table 'audit_logs' exists, or we skip logging if strict tables not set up
     logAction: async (username: string, action: string, details: string) => {
-        // Implementation optional for this demo scope
         console.log(`[Audit] ${username} ${action}: ${details}`);
     },
 
