@@ -10,12 +10,47 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.vite
 *.local
 .env
 .env.*
 !.env.example
 !frontend/.env.example
 !backend/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.python-version
+.venv/
+.tox/
+.nox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+coverage/
+*.egg-info/
+.eggs/
+build/
+
+# Backend
+backend/.venv/
+backend/.env
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.coverage
+backend/coverage/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+frontend/.eslintcache
+frontend/.stylelintcache
 
 # Editor directories and files
 .vscode/*
@@ -27,6 +62,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-backend/.venv
-backend/.env
