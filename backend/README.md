@@ -12,11 +12,15 @@
    pip install -e .
    ```
 
-2. Set environment variables (or copy from `.env.example` to `.env`):
+2. Set environment variables by copying `.env.example` to `.env` and editing values:
    ```bash
-   export DATABASE_URL="postgresql+psycopg://user:pass@localhost:5432/travel_builder"
-   export JWT_SECRET="change-me"
-   export GEMINI_API_KEY="your-gemini-key"  # optional for AI endpoints
+   cp .env.example .env
+   ```
+   Example `.env`:
+   ```
+   DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/travel_builder
+   JWT_SECRET=change-me
+   GEMINI_API_KEY=your-gemini-key
    ```
 
 3. Initialize database schema:
@@ -34,7 +38,6 @@
 - `JWT_SECRET` (required)
 - `JWT_ALGORITHM` (optional, default `HS256`)
 - `ACCESS_TOKEN_EXPIRE_MINUTES` (optional, default `1440`)
-- `ADMIN_USERNAME` / `ADMIN_PASSWORD` (optional, defaults: `admin` / `liuwen`)
 - `GEMINI_API_KEY` (optional, enables AI endpoints)
 - `CORS_ORIGINS` (optional, comma-separated list)
 - `LOG_LEVEL` (optional, default `INFO`)
@@ -72,7 +75,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --app-dir src
 - App data export: `GET /api/data`, restore via `POST /api/data/restore`.
 
 ### Security
-- Rotate `JWT_SECRET` and admin credentials.
+- Rotate `JWT_SECRET` and enforce strong admin passwords.
 - Restrict `CORS_ORIGINS` to trusted domains.
 - Run behind HTTPS and a reverse proxy.
 
@@ -80,6 +83,21 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --app-dir src
 - Increase `--workers` based on CPU cores.
 - Consider PgBouncer for connection pooling at scale.
 
+## User Management
+- Accounts are stored in the database only (no admin credentials in `.env`).
+- Create a user via API or the CLI script below, then promote to admin in SQL or CLI if needed.
+
+### CLI (recommended for initial admin)
+```
+python scripts/manage_users.py create --username admin --role admin
+python scripts/manage_users.py promote --username your_admin --role admin
+python scripts/manage_users.py reset-password --username your_admin
+```
+
+### SQL
+```
+update users set role = 'admin' where username = 'your_admin';
+```
+
 ## Notes
 - Database schema is maintained in `db/schema.sql` and must be applied before startup.
-- Admin user is bootstrapped from `ADMIN_USERNAME`/`ADMIN_PASSWORD` (defaults: admin/liuwen).

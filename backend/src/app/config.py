@@ -18,9 +18,6 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field("HS256", alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(60 * 24, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
 
-    admin_username: str = Field("admin", alias="ADMIN_USERNAME")
-    admin_password: str = Field("liuwen", alias="ADMIN_PASSWORD")
-
     gemini_api_key: str | None = Field(None, alias="GEMINI_API_KEY")
 
     cors_origins: str = Field("", alias="CORS_ORIGINS")
