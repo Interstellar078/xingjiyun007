@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Download, Save, FolderOpen, Rocket, Sparkles, Database, Filter, Calendar, MapPin, Clock, Copy, Edit3, X, FileDown, FileUp, HardDrive, PlusCircle, CheckCircle, RotateCcw, ArrowRightCircle, Search, LogOut, ShieldAlert, FileSpreadsheet, Calculator, Info, Library, Wand2, Loader2, Upload, Cloud, RefreshCw, Settings, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Download, Save, FolderOpen, Rocket, Sparkles, Database, Filter, Calendar, MapPin, Clock, Copy, Edit3, X, FileDown, FileUp, HardDrive, PlusCircle, CheckCircle, RotateCcw, ArrowRightCircle, Search, LogOut, ShieldAlert, FileSpreadsheet, Calculator, Info, Library, Wand2, Loader2, Upload, Cloud, RefreshCw } from 'lucide-react';
 import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
 import { DayRow, TripSettings, TransportType, CustomColumn, SavedTrip, CarCostEntry, PoiCity, PoiSpot, PoiHotel, PoiActivity, User, CountryFile } from './types';
@@ -13,10 +13,8 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { addDays, generateUUID } from './utils/dateUtils';
 import { suggestHotels, generateFileName, generateComprehensiveItinerary, ItineraryItem } from './services/geminiService';
 // Removed auto-seeding import usage here, only used in ResourceDB manually now
-import { generateSeedData } from './utils/seedData';
 import { AuthService } from './services/authService';
 import { StorageService } from './services/storageService';
-import { SupabaseManager, SupabaseConfig } from './services/supabaseClient';
 
 // Constants
 const INITIAL_ROWS = 8;
@@ -30,8 +28,6 @@ export default function App() {
   // --- App State ---
   const [isAppLoading, setIsAppLoading] = useState(true);
   const [cloudStatus, setCloudStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
-  const [showCloudConfig, setShowCloudConfig] = useState(false);
-  const [cloudConfig, setCloudConfig] = useState<SupabaseConfig>({ url: '', key: '' });
 
   // 1. Settings & UI State
   const [settings, setSettings] = useState<TripSettings>({
@@ -119,13 +115,6 @@ export default function App() {
       const initApp = async () => {
           setIsAppLoading(true);
           
-          // Check Config
-          if (!SupabaseManager.isConfigured()) {
-              setIsAppLoading(false);
-              setShowCloudConfig(true);
-              return;
-          }
-
           // Check Auth
           const user = await AuthService.getCurrentUser();
           if (user) setCurrentUser(user);
@@ -186,7 +175,7 @@ export default function App() {
       const firstRun = useRef(true);
       useEffect(() => {
           if (firstRun.current) { firstRun.current = false; return; }
-          if (isAppLoading || !SupabaseManager.isConfigured()) return;
+          if (isAppLoading) return;
           
           setCloudStatus('syncing');
           const handler = setTimeout(() => {
@@ -293,16 +282,6 @@ export default function App() {
   };
 
   // --- Handlers ---
-  const handleSaveConfig = () => {
-      if(!cloudConfig.url || !cloudConfig.key) {
-          alert("请填写完整的 URL 和 Key");
-          return;
-      }
-      SupabaseManager.saveConfig(cloudConfig);
-      setShowCloudConfig(false);
-      window.location.reload(); // Reload to init with new config
-  };
-
   const handleRouteUpdate = (index: number, val: string[]) => {
       const newRouteStr = val.join('-');
       const newRows = [...rows];
@@ -509,58 +488,6 @@ export default function App() {
 
   // --- UI Render ---
 
-  if (showCloudConfig) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-8">
-                <div className="flex items-center gap-3 mb-6">
-                    <Cloud size={32} className="text-blue-600"/>
-                    <h1 className="text-2xl font-bold text-gray-800">配置云端存储</h1>
-                </div>
-                
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 text-sm text-blue-800">
-                    <p className="font-bold mb-2">需要连接 Supabase 数据库</p>
-                    <p>本项目已升级为真实云存储架构。请提供您的 Supabase 项目信息以继续。</p>
-                    <p className="mt-2 text-xs opacity-75">
-                        1. 访问 supabase.com 创建免费项目<br/>
-                        2. 在 Project Settings -> API 中找到 URL 和 Anon Key<br/>
-                        3. 在 SQL Editor 中运行下方初始化脚本
-                    </p>
-                </div>
-
-                <div className="space-y-4 mb-6">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Project URL</label>
-                        <input type="text" className="w-full border rounded p-2" value={cloudConfig.url} onChange={(e) => setCloudConfig({...cloudConfig, url: e.target.value})} placeholder="https://xyz.supabase.co" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Anon Public Key</label>
-                        <input type="text" className="w-full border rounded p-2" value={cloudConfig.key} onChange={(e) => setCloudConfig({...cloudConfig, key: e.target.value})} placeholder="eyJhbGciOiJIUzI1NiIsInR5..." />
-                    </div>
-                </div>
-
-                <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">初始化 SQL (请在 Supabase SQL Editor 中运行)</label>
-                    <pre className="bg-gray-900 text-gray-100 p-3 rounded text-xs overflow-auto h-32">
-{`-- Create Data Table
-create table if not exists app_data (
-  key text primary key,
-  value jsonb,
-  updated_at timestamptz default now()
-);
-
--- Enable RLS (Allow All for Demo)
-alter table app_data enable row level security;
-create policy "Public Access" on app_data for all using (true) with check (true);`}
-                    </pre>
-                </div>
-
-                <button onClick={handleSaveConfig} className="w-full py-3 bg-blue-600 text-white rounded font-bold hover:bg-blue-700">连接并启动</button>
-            </div>
-        </div>
-      );
-  }
-
   if (isAppLoading) {
       return (
           <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center">
@@ -653,9 +580,6 @@ create policy "Public Access" on app_data for all using (true) with check (true)
                  </button>
                  <button onClick={handleExportExcel} className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors shadow-sm">
                     <FileSpreadsheet size={16} /> 导出
-                 </button>
-                 <button onClick={() => setShowCloudConfig(true)} className="text-gray-400 hover:text-gray-600 ml-2">
-                     <Settings size={16}/>
                  </button>
               </div>
            </div>
