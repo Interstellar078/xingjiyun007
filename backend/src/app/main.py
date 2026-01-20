@@ -6,11 +6,13 @@ from sqlalchemy.orm import Session
 
 from .auth import hash_password
 from .config import get_settings
-from .db import Base, engine, SessionLocal
+from .db import SessionLocal
+from .logging_config import configure_logging
 from .models import User
 from .routers import ai, auth, data, admin
 
 settings = get_settings()
+configure_logging(settings.log_level, settings.log_json)
 
 app = FastAPI(title="Custom Travel Builder API")
 
@@ -30,8 +32,6 @@ app.include_router(ai.router)
 
 @app.on_event("startup")
 def on_startup() -> None:
-    Base.metadata.create_all(bind=engine)
-
     db: Session = SessionLocal()
     try:
         existing = db.query(User).filter(User.username == settings.admin_username).first()

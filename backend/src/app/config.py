@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -24,17 +23,21 @@ class Settings(BaseSettings):
 
     gemini_api_key: str | None = Field(None, alias="GEMINI_API_KEY")
 
-    cors_origins: List[str] = Field(default_factory=list, alias="CORS_ORIGINS")
+    cors_origins: str = Field("", alias="CORS_ORIGINS")
+    log_level: str = Field("INFO", alias="LOG_LEVEL")
+    log_json: bool = Field(False, alias="LOG_JSON")
 
     model_config = {
         "case_sensitive": False,
         "populate_by_name": True,
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
     }
 
     @property
     def parsed_cors_origins(self) -> list[str]:
-        if self.cors_origins:
-            return self.cors_origins
+        if isinstance(self.cors_origins, str) and self.cors_origins.strip():
+            return _split_csv(self.cors_origins)
         return [
             "http://localhost:5173",
             "http://127.0.0.1:5173",
@@ -60,6 +63,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
-    if isinstance(settings.cors_origins, str):
-        settings.cors_origins = _split_csv(settings.cors_origins)
     return settings

@@ -17,7 +17,7 @@
 
 ## Backend (FastAPI + Postgres)
 
-**Prerequisites:** Python 3.11+，Postgres 14+
+**Prerequisites:** Python 3.11+，Postgres 16+
 
 1. 进入后端目录：`cd backend`
 2. 创建并激活虚拟环境：\n`python -m venv .venv && source .venv/bin/activate`
