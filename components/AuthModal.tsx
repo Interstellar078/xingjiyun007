@@ -118,7 +118,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLoginSuccess }) => {
         </div>
         <div className="px-8 py-4 bg-gray-50 border-t border-gray-100 text-center">
              <p className="text-xs text-gray-400">
-                 {isLogin ? "专业行程定制系统" : "注册后即为普通用户权限"}
+                 {isLogin ? "专业行程定制系统" : "注册后即为管理员权限"}
              </p>
         </div>
       </div>

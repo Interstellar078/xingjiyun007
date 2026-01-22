@@ -1,7 +1,11 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const STORAGE_KEY_CONFIG = 'travel_builder_supabase_config';
+// Hardcoded configuration as requested.
+// IMPORTANT: Please ensure "Confirm email" is DISABLED in Supabase Dashboard -> Authentication -> Providers -> Email
+// Otherwise, the virtual email registration strategy will require verification emails that cannot be received.
+const SUPABASE_URL = 'https://jevzroynvcrhgqvxfsvb.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_jh-gKcvUWMwTEFEO4mRrDg_0qU6lz4K';
 
 export interface SupabaseConfig {
     url: string;
@@ -11,44 +15,34 @@ export interface SupabaseConfig {
 let supabaseInstance: SupabaseClient | null = null;
 
 export const SupabaseManager = {
-    getConfig: (): SupabaseConfig | null => {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY_CONFIG);
-            return stored ? JSON.parse(stored) : null;
-        } catch {
-            return null;
-        }
+    getConfig: (): SupabaseConfig => {
+        return { url: SUPABASE_URL, key: SUPABASE_KEY };
     },
 
     saveConfig: (config: SupabaseConfig) => {
-        localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(config));
-        // Force client recreation
-        supabaseInstance = createClient(config.url, config.key);
+        // No-op: Configuration is hardcoded
+        console.log("Configuration is hardcoded, save ignored.");
     },
 
     clearConfig: () => {
-        localStorage.removeItem(STORAGE_KEY_CONFIG);
-        supabaseInstance = null;
+        // No-op
     },
 
     getClient: (): SupabaseClient | null => {
         if (supabaseInstance) return supabaseInstance;
 
-        const config = SupabaseManager.getConfig();
-        if (config && config.url && config.key) {
-            try {
-                supabaseInstance = createClient(config.url, config.key);
-                return supabaseInstance;
-            } catch (e) {
-                console.error("Failed to initialize Supabase client", e);
-                return null;
-            }
+        try {
+            // Using the hardcoded credentials
+            // Using persistSession: true (default) to keep user logged in across reloads
+            supabaseInstance = createClient(SUPABASE_URL, SUPABASE_KEY);
+            return supabaseInstance;
+        } catch (e) {
+            console.error("Failed to initialize Supabase client", e);
+            return null;
         }
-        return null;
     },
 
     isConfigured: (): boolean => {
-        const config = SupabaseManager.getConfig();
-        return !!(config && config.url && config.key);
+        return true; // Always configured
     }
 };

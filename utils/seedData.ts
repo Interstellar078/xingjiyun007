@@ -91,7 +91,14 @@ const GLOBAL_DATA: Record<string, CountryData> = {
   "新西兰 (New Zealand)": { tier: 1, cities: [
       ["皇后镇", ["瓦卡蒂普湖"], ["玛塔考瑞"], ["高空跳伞", "蹦极", "蒸汽船晚宴", "喷射快艇"]],
       ["奥克兰", ["天空塔"], ["柏悦"], ["霍比特人村导览", "萤火虫洞"]]
-  ]}
+  ]},
+  
+  // === AFRICA ===
+  "坦桑尼亚 (Tanzania)": { tier: 1, cities: [
+      ["阿鲁沙 (Arusha)", ["乞力马扎罗山", "梅鲁火山"], ["Gran Melia Arusha", "Legendary Lodge"], ["咖啡庄园之旅", "文化村访问"]],
+      ["塞伦盖蒂 (Serengeti)", ["塞伦盖蒂国家公园", "恩戈罗恩戈罗"], ["Four Seasons Safari Lodge", "Singita Sasakwa", "&Beyond Crater Lodge"], ["热气球Safari", "全天越野猎游", "丛林晚宴"]],
+      ["桑给巴尔 (Zanzibar)", ["石头城", "南威海滩"], ["Park Hyatt Zanzibar", "The Residence Zanzibar", "Zuri Zanzibar"], ["海豚湾追逐", "蓝瑟泻湖浮潜", "落日风帆船"]]
+  ]},
 };
 
 export const generateSeedData = () => {
@@ -225,6 +232,7 @@ export const generateSeedTrips = (
                 route: route,
                 transport: ['包车'],
                 hotelName: selectedHotel ? selectedHotel.name : '',
+                hotelRoomType: selectedHotel ? selectedHotel.roomType : '', // Added required field
                 ticketName: selectedSpots.map(s => s.name),
                 activityName: selectedActs.map(a => a.name),
                 description: `游览${currentCity.name}精华景点`,

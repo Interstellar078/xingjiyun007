@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Search } from 'lucide-react';
+import { ChevronDown, Search, X } from 'lucide-react';
 
 interface MultiSelectProps {
   options: string[];
@@ -49,16 +49,15 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
     if (value.includes(option)) {
       onChange(value.filter(v => v !== option));
     } else {
-      // If not selected, add it to the end (preserving order of selection is important for Route)
+      // If not selected, add it to the end
       onChange([...value, option]);
     }
   };
 
-  // For Route: We might want to allow re-ordering? 
-  // The current simple MultiSelect just appends. 
-  // If user wants A-B-C, they must click A, then B, then C.
-  // If they uncheck B, it becomes A-C. 
-  // This seems acceptable for a basic implementation.
+  const removeOption = (e: React.MouseEvent, option: string) => {
+      e.stopPropagation(); // Prevent opening/closing dropdown
+      onChange(value.filter(v => v !== option));
+  };
 
   const filteredOptions = options.filter(opt => 
     opt.toLowerCase().includes(searchTerm.toLowerCase())
@@ -67,14 +66,22 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
   return (
     <div className={`relative ${className}`} ref={containerRef}>
       <div
-        className="w-full border border-transparent bg-transparent hover:bg-gray-100 rounded px-2 py-1 cursor-pointer flex items-center justify-between group"
+        className="w-full min-h-[30px] border border-transparent bg-transparent hover:bg-gray-100 rounded px-1 py-1 cursor-pointer flex items-center justify-between group"
         onClick={() => setIsOpen(!isOpen)}
-        title={value.join(displaySeparator)}
       >
-        <span className="truncate max-w-[150px] block text-sm">
-          {value.length > 0 ? value.join(displaySeparator) : <span className="text-gray-300">{placeholder}</span>}
-        </span>
-        <ChevronDown size={14} className="text-gray-400 opacity-0 group-hover:opacity-100" />
+        <div className="flex flex-wrap gap-1 flex-1">
+          {value.length > 0 ? (
+             value.map((v, idx) => (
+               <span key={idx} className="bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 border border-blue-200">
+                  {v}
+                  <X size={10} className="hover:text-red-500 cursor-pointer" onClick={(e) => removeOption(e, v)} />
+               </span>
+             ))
+          ) : (
+             <span className="text-gray-300 text-xs px-1">{placeholder}</span>
+          )}
+        </div>
+        <ChevronDown size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 shrink-0 ml-1" />
       </div>
 
       {isOpen && (
@@ -100,7 +107,6 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
             {filteredOptions.length > 0 ? (
               filteredOptions.map((option) => {
                 const isSelected = value.includes(option);
-                // Find index to show order if needed? No, just checkbox.
                 return (
                   <div
                     key={option}
@@ -111,7 +117,6 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                         {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                     </div>
                     <span className={`text-sm break-words leading-tight ${isSelected ? 'text-blue-700 font-medium' : 'text-gray-700'}`}>{option}</span>
-                    {isSelected && <span className="ml-auto text-xs text-blue-400 font-mono">{value.indexOf(option) + 1}</span>} 
                   </div>
                 );
               })

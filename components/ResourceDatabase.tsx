@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, X, Car, Hotel, Globe, MapPin, Search, Ticket, Palmtree, RotateCcw, FileSpreadsheet, Upload, Loader2, Check, AlertCircle, Info, Lock, FileText, Image as ImageIcon, Paperclip, Eye, Download, File as FileIcon } from 'lucide-react';
+import { Plus, Trash2, X, Car, Hotel, Globe, MapPin, Search, Ticket, Palmtree, RotateCcw, FileSpreadsheet, Upload, Loader2, Check, AlertCircle, Info, Lock, FileText, Image as ImageIcon, Paperclip, Eye, Download, File as FileIcon, GitMerge } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { CarCostEntry, PoiCity, PoiSpot, PoiHotel, PoiActivity, CountryFile } from '../types';
 import { generateUUID } from '../utils/dateUtils';
@@ -714,6 +713,80 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
       }
   };
 
+  // Smart Merge Cities Logic
+  const handleSmartMerge = () => {
+      if (isReadOnly) return;
+      const currentCitiesList = poiCities.filter(c => c.country === selectedCountry);
+      if (currentCitiesList.length === 0) return;
+
+      const merges: { target: PoiCity; sources: PoiCity[] }[] = [];
+      const processedIds = new Set<string>();
+
+      // 1. Identify Composite Names: "Name (Eng)"
+      const composites = currentCitiesList.filter(c => c.name.includes('(') && c.name.includes(')'));
+      
+      composites.forEach(target => {
+        if (processedIds.has(target.id)) return;
+        
+        // Extract parts using regex: Chinese (English)
+        const match = target.name.match(/^(.+?)\s*\((.+?)\)$/);
+        if (!match) return;
+        
+        const part1 = match[1].trim(); // Usually Chinese
+        const part2 = match[2].trim(); // Usually English
+        
+        // Find candidates (Exact match of either part, or exact full name duplicate)
+        const sources = currentCitiesList.filter(c => 
+            c.id !== target.id && 
+            !processedIds.has(c.id) && 
+            (c.name.trim() === part1 || c.name.trim() === part2 || c.name.trim() === target.name.trim()) 
+        );
+
+        if (sources.length > 0) {
+            merges.push({ target, sources });
+            processedIds.add(target.id);
+            sources.forEach(s => processedIds.add(s.id));
+        }
+      });
+
+      if (merges.length === 0) {
+          alert("未发现可自动合并的地点。\n\n规则：需存在 '中文 (English)' 格式的地点，且存在对应的 '中文' 或 'English' 单独地点。");
+          return;
+      }
+
+      // Confirm with user
+      const msg = merges.map(m => 
+          `保留: ${m.target.name}\n合并: [${m.sources.map(s => s.name).join(', ')}]`
+      ).join('\n\n');
+      
+      if (!window.confirm(`检测到以下地点可以合并。\n确认合并后，所有资源将移动到保留地点，被合并的地点将被删除。\n\n${msg}`)) return;
+
+      // Execute Merge
+      let newSpots = [...poiSpots];
+      let newHotels = [...poiHotels];
+      let newActivities = [...poiActivities];
+      const citiesToRemove = new Set<string>();
+
+      merges.forEach(({ target, sources }) => {
+          sources.forEach(source => {
+              // Re-link resources to target ID
+              newSpots = newSpots.map(s => s.cityId === source.id ? { ...s, cityId: target.id } : s);
+              newHotels = newHotels.map(h => h.cityId === source.id ? { ...h, cityId: target.id } : h);
+              newActivities = newActivities.map(a => a.cityId === source.id ? { ...a, cityId: target.id } : a);
+              citiesToRemove.add(source.id);
+          });
+      });
+
+      // Update State
+      onUpdatePoiSpots(newSpots);
+      onUpdatePoiHotels(newHotels);
+      onUpdatePoiActivities(newActivities);
+      onUpdatePoiCities(poiCities.filter(c => !citiesToRemove.has(c.id)));
+      
+      alert("合并完成！");
+      if (citiesToRemove.has(selectedCityId)) setSelectedCityId('');
+  };
+
   // Generic Item Updates
   const updateItem = <T extends { id: string }>(items: T[], updater: (newItems: T[]) => void, id: string, diff: Partial<T>) => {
       if (isReadOnly) return;
@@ -984,7 +1057,14 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                         <>
                             {/* City Sidebar */}
                             <div className="w-48 border-r border-gray-200 bg-gray-50 flex flex-col overflow-hidden">
-                                <div className="p-3 border-b text-xs font-bold text-gray-500 uppercase tracking-wider">地点列表 (城市/机场等)</div>
+                                <div className="p-3 border-b flex justify-between items-center">
+                                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">地点列表</span>
+                                    {!isReadOnly && (
+                                        <button onClick={handleSmartMerge} className="text-blue-500 hover:text-blue-700" title="自动合并中英文地点 (如: 'A', 'A(B)', 'B' 合并为 'A(B)')">
+                                            <GitMerge size={14}/>
+                                        </button>
+                                    )}
+                                </div>
                                 <div className="flex-1 overflow-y-auto">
                                     {currentCities.map(city => (
                                         <div key={city.id} onClick={() => setSelectedCityId(city.id)} className={`px-4 py-2 cursor-pointer text-sm flex justify-between items-center group ${selectedCityId === city.id ? 'bg-white text-blue-600 font-medium border-r-2 border-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}>
@@ -1070,7 +1150,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                         <thead className="bg-gray-50">
                                                           <tr>
                                                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 w-1/4">酒店名称</th>
-                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">房型及价格 (元)</th>
+                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">房型及价格</th>
                                                             <th className="w-12"></th>
                                                           </tr>
                                                         </thead>

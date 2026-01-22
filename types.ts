@@ -25,6 +25,7 @@ export interface DayRow {
   transport: string[]; // Multi-select
   carModel?: string; // Selected Car Model from DB
   hotelName: string;
+  hotelRoomType: string; // New: Selected Room Type
   ticketName: string[]; // Multi-select Spot Names
   activityName: string[]; // Multi-select Activity Names
   description: string; // New: Itinerary Details

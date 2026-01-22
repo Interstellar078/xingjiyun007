@@ -3,6 +3,21 @@ import { User, AuditLog, UserRole } from '../types';
 import { SupabaseManager } from './supabaseClient';
 import { StorageService } from './storageService';
 
+// Helper to generate a consistent, valid email from any username input
+// This strategy avoids conflicts with real email addresses and handles special characters safely.
+const getEmailFromUsername = (username: string): string => {
+    const clean = username.trim();
+    // 1. If it looks like a real email, use it directly
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (emailRegex.test(clean)) return clean;
+
+    // 2. Otherwise, construct a fake email.
+    // Use encodeURIComponent to handle Unicode (Chinese), spaces, and special chars.
+    // Replace '%' with '_' to ensure the local-part is safe for strict email validators.
+    const safeName = encodeURIComponent(clean).replace(/%/g, '_');
+    return `${safeName}@travel.user`; // Use a dummy domain to prevent conflict with real users
+};
+
 export const AuthService = {
     init: async () => {
         // No-op for Supabase usually
@@ -10,36 +25,67 @@ export const AuthService = {
 
     // --- User Management ---
     getUsers: async (): Promise<User[]> => {
-        // Now fetches real list from DB
         return await StorageService.getUserProfiles();
     },
 
     register: async (username: string, password: string): Promise<{ success: boolean, message: string }> => {
         const client = SupabaseManager.getClient();
-        if (!client) return { success: false, message: '未连接云端服务' };
+        if (!client) return { success: false, message: '未连接云端服务，请先配置 Supabase' };
 
-        const email = username.includes('@') ? username : `${username}@example.com`;
+        if (password.length < 6) {
+            return { success: false, message: '密码长度至少需6位' };
+        }
+
+        const cleanUsername = username.trim();
+        const email = getEmailFromUsername(cleanUsername);
+
+        console.log(`[Auth] Registering: User="${cleanUsername}" -> Email="${email}"`);
 
         // 1. Create Auth User
         const { data, error } = await client.auth.signUp({
             email,
             password,
             options: {
-                data: { username, role: 'user' }
+                // CHANGE: Default role is now 'user' instead of 'admin'
+                data: { username: cleanUsername, role: 'user' } 
             }
         });
 
-        if (error) return { success: false, message: error.message };
+        if (error) {
+            console.error("Supabase SignUp Error:", error);
+            // Translate common errors
+            if (error.message.includes('already registered')) return { success: false, message: '该用户名已被注册' };
+            if (error.message.includes('invalid')) return { success: false, message: `注册格式错误: ${error.message}` };
+            return { success: false, message: `注册失败: ${error.message}` };
+        }
 
-        // 2. Create Public Profile Record (for Admin Dashboard listing)
+        // 2. Create Public Profile Record in app_data
         if (data.user) {
             const newUser: User = {
-                username: username,
-                password: '', // Don't store password
+                username: cleanUsername,
+                password: '', // Do not store password in public profile
+                // CHANGE: Default role is now 'user' instead of 'admin'
                 role: 'user',
                 createdAt: Date.now()
             };
-            await StorageService.saveUserProfile(newUser);
+            
+            try {
+                await StorageService.saveUserProfile(newUser);
+                console.log(`[Auth] Profile saved for ${cleanUsername}`);
+            } catch (storageError: any) {
+                console.error("Profile Save Error:", storageError);
+                return { success: true, message: '账号创建成功，但用户资料保存失败(可能是网络问题)，请尝试直接登录。' };
+            }
+
+            // 3. Check for Email Confirmation requirement
+            // If session is null, it means auto-confirm is OFF in Supabase and email verification is required.
+            // Since we use fake emails, this MUST be disabled in Supabase.
+            if (!data.session) {
+                 return { 
+                     success: true, 
+                     message: '注册成功！【重要提示】检测到未自动登录，请务必在 Supabase 后台 (Authentication -> Providers -> Email) 中关闭 "Confirm email" 选项，否则无法使用此用户名登录。' 
+                 };
+            }
         }
 
         return { success: true, message: '注册成功！' };
@@ -49,7 +95,10 @@ export const AuthService = {
         const client = SupabaseManager.getClient();
         if (!client) return { success: false, message: '未连接云端服务' };
 
-        const email = username.includes('@') ? username : `${username}@example.com`;
+        const cleanUsername = username.trim();
+        const email = getEmailFromUsername(cleanUsername);
+
+        console.log(`[Auth] Logging in: User="${cleanUsername}" -> Email="${email}"`);
 
         // Attempt normal login
         const { data, error } = await client.auth.signInWithPassword({
@@ -57,9 +106,9 @@ export const AuthService = {
             password
         });
 
-        // --- Admin Bootstrap Logic ---
+        // --- Admin Bootstrap Logic (Emergency Backdoor for first run) ---
         // If login failed, but credentials match the seed admin, try to create it on the fly.
-        if (error && username === 'admin' && password === 'liuwen') {
+        if (error && cleanUsername === 'admin' && password === 'liuwen') {
             console.log("Attempting to bootstrap Admin account...");
             const { data: signUpData, error: signUpError } = await client.auth.signUp({
                 email,
@@ -80,17 +129,27 @@ export const AuthService = {
         }
         // -----------------------------
 
-        if (error) return { success: false, message: '用户名或密码错误' };
+        if (error) {
+            console.error("Login Error:", error);
+            if (error.message.includes('Invalid login credentials')) return { success: false, message: '用户名或密码错误' };
+            if (error.message.includes('Email not confirmed')) return { success: false, message: '登录失败：邮箱未验证。请在 Supabase 后台 Authentication -> Providers -> Email 中关闭 "Confirm email" 选项。' };
+            return { success: false, message: `登录失败: ${error.message}` };
+        }
         
         if (data.user) {
             const user: User = {
-                username: data.user.user_metadata.username || email,
+                username: data.user.user_metadata.username || cleanUsername,
                 password: '',
                 role: (data.user.user_metadata.role as UserRole) || 'user',
                 createdAt: new Date(data.user.created_at).getTime()
             };
-            // Ensure profile exists in DB (sync fix for old users)
-            await StorageService.saveUserProfile(user);
+            
+            // Ensure profile exists in DB (sync fix for old users or missed profile creation)
+            try {
+                await StorageService.saveUserProfile(user);
+            } catch (e) {
+                console.warn("Failed to sync profile on login", e);
+            }
             
             return { success: true, user, message: '登录成功' };
         }

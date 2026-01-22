@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { DayRow, SavedTrip } from "../types";
 
@@ -66,6 +65,7 @@ export interface ItineraryItem {
   destinationCountry?: string; // New: Explicit country for destination
   ticketName?: string;
   activityName?: string;
+  hotelName?: string; // New: Hotel recommendation
   description?: string; // New: Detailed description
 }
 
@@ -88,6 +88,7 @@ export const generateComprehensiveItinerary = async (
   currentRows: DayRow[],
   historyTrips: SavedTrip[],
   availableCountries: string[], // New: Pass existing countries for matching
+  availableCities: string[], // New: Pass existing cities for matching
   userPrompt?: string 
 ): Promise<AIPlanningResult | null> => {
   const apiKey = getApiKey();
@@ -113,8 +114,12 @@ export const generateComprehensiveItinerary = async (
     let prompt = `
       作为一名专业的旅行行程规划师，请根据用户的【指令】规划一份完整的行程。
 
-      【系统现有国家列表 (参考库)】
+      【系统现有资源库 (重要参考)】
+      1. **现有国家列表**:
       ${availableCountries.join(', ')}
+      
+      2. **现有城市列表**:
+      ${availableCities.join(', ')}
 
       【当前界面状态 (仅供参考)】
       - 原定目的地: ${currentDestinations.join(', ') || "未设定"}
@@ -128,21 +133,25 @@ export const generateComprehensiveItinerary = async (
          - 如果用户指令中包含了新的目的地，请**优先使用用户指令中的目的地**。
          - **关于国家名称的严格要求**：
             - 检测到的目的地必须是**国家名称**。
-            - **如果该国家已存在于【系统现有国家列表】中，必须直接使用列表中的准确名称**（例如：列表中有 "中国 (China)"，你必须返回 "中国 (China)"，而不能只返回 "China" 或 "中国"）。
-            - 如果不在列表中，请尽量使用 "中文名 (English Name)" 的标准格式。
+            - **如果该国家已存在于【现有国家列表】中，必须直接使用列表中的准确名称**。
       
-      2. **生成行程**：
-         - 必须包含：第几天(day)、出发地(origin)、到达地(destination)、门票(ticketName)、活动(activityName)、行程详情(description)。
-         - **关键：必须明确每个城市所属的国家**。
-            - originCountry: 出发地所在的国家（同样遵循上述命名规则，优先匹配系统列表）。
-            - destinationCountry: 到达地所在的国家（同样遵循上述命名规则，优先匹配系统列表）。
-         - **严格区分门票和活动**：
-            - "ticketName" (门票名称)：具体的景点/景区名称（如：迪士尼乐园、故宫）。
-            - "activityName" (活动名称)：体验类项目或动作（如：和服体验、出海浮潜、CityWalk）。
+      2. **生成行程 (严格匹配城市名)**：
+         - 必须包含：第几天(day)、出发地(origin)、到达地(destination)、酒店(hotelName)、门票(ticketName)、活动(activityName)、行程详情(description)。
+         - **关键规则：优先匹配现有资源**
+            - 对于 "origin" (出发城市) 和 "destination" (到达城市/游玩城市)：
+            - 请检查该城市是否存在于上面的【现有城市列表】中。
+            - **如果存在 (即使是中文/英文部分匹配)，必须严格输出列表中的准确名称**。
+            - 例如：如果列表中有 "东京 (Tokyo)"，而你想写 "东京" 或 "Tokyo"，请务必输出 "东京 (Tokyo)"。
+            - 如果列表中没有，则使用标准中文名称，或 "中文 (English)" 格式。
+         - **字段定义**：
+            - originCountry: 出发地所在的国家（优先匹配系统列表）。
+            - destinationCountry: 到达地所在的国家（优先匹配系统列表）。
+            - "hotelName" (酒店名称)：推荐入住的具体酒店名称。
+            - "ticketName" (门票名称)：具体的景点/景区名称。
+            - "activityName" (活动名称)：体验类项目或动作。
          - **行程详情 (description) - 关键**：
-            - **请将所有无法放入“门票”或“活动”字段的详细信息写入此字段**。
-            - 包含：详细的每日流程安排、推荐的特定餐厅/美食（如用户要求的日料、米其林等）、交通换乘提示、以及用户指令中提到的任何特殊要求或偏好备注。
-            - **目标**：保证用户在指令中提出的所有定制化要求（如“住很好的酒店”、“喜欢吃日料”、“即使只有两个人也要...”）都能在行程中体现出来，不要丢失信息。
+            - **请将所有无法放入上述字段的详细信息写入此字段**。
+            - 包含：详细的每日流程安排、推荐的特定餐厅/美食、交通换乘提示、以及用户指令中提到的任何特殊要求或偏好备注。
          - 语言：简体中文。
 
       请返回一个 JSON 对象，包含检测到的**国家列表**和行程数组。
@@ -167,13 +176,14 @@ export const generateComprehensiveItinerary = async (
                     type: Type.OBJECT,
                     properties: {
                         day: { type: Type.INTEGER },
-                        origin: { type: Type.STRING },
+                        origin: { type: Type.STRING, description: "Origin city name. MUST use exact name from 'Existing Cities List' if available." },
                         originCountry: { type: Type.STRING, description: "The country of the origin city. MUST match existing list if applicable." },
-                        destination: { type: Type.STRING },
+                        destination: { type: Type.STRING, description: "Destination city name. MUST use exact name from 'Existing Cities List' if available." },
                         destinationCountry: { type: Type.STRING, description: "The country of the destination city. MUST match existing list if applicable." },
                         ticketName: { type: Type.STRING },
                         activityName: { type: Type.STRING },
-                        description: { type: Type.STRING, description: "Detailed daily itinerary, including dining recommendations, logistics, and specific user requests that don't fit in other fields." }
+                        hotelName: { type: Type.STRING, description: "Recommended hotel name" },
+                        description: { type: Type.STRING, description: "Detailed daily itinerary, including dining recommendations, logistics, and specific user requests." }
                     },
                     required: ["day", "origin", "destination", "destinationCountry", "description"]
                 }

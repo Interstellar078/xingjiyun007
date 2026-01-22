@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, History, X } from 'lucide-react';
 
@@ -11,6 +10,7 @@ interface AutocompleteProps {
   suggestions: string[]; // Combined history + static
   fetchSuggestions?: (query: string) => Promise<string[]>; // Optional async
   className?: string;
+  separator?: string; // New: Support for multi-value inputs (e.g. "-")
 }
 
 export const Autocomplete: React.FC<AutocompleteProps> = ({
@@ -21,7 +21,8 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
   placeholder,
   suggestions: staticSuggestions,
   fetchSuggestions,
-  className
+  className,
+  separator
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeSuggestions, setActiveSuggestions] = useState<string[]>([]);
@@ -42,20 +43,27 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
     const val = e.target.value;
     onChange(val);
 
+    // Logic for separator (Multi-value)
+    let query = val;
+    if (separator && val.lastIndexOf(separator) > -1) {
+        query = val.substring(val.lastIndexOf(separator) + 1);
+    }
+    query = query.trim();
+
     let matches: string[] = [];
 
-    // Filter static suggestions (history + cities)
-    if (val.length > 0) {
-        matches = staticSuggestions.filter(s => s.toLowerCase().includes(val.toLowerCase())).slice(0, 10);
+    // Filter static suggestions
+    if (query.length > 0) {
+        matches = staticSuggestions.filter(s => s.toLowerCase().includes(query.toLowerCase())).slice(0, 10);
     } else {
-        matches = staticSuggestions.slice(0, 10); // Show recent/top on focus empty
+        // If empty query (or empty after separator), show top suggestions
+        matches = staticSuggestions.slice(0, 10); 
     }
 
-    // If we have an async fetcher and typed something (Used for hotels if enabled)
-    if (fetchSuggestions && val.length > 1) {
+    // Async fetcher support
+    if (fetchSuggestions && query.length > 1) {
        try {
-           const remoteMatches = await fetchSuggestions(val);
-           // Merge unique
+           const remoteMatches = await fetchSuggestions(query);
            matches = Array.from(new Set([...matches, ...remoteMatches]));
        } catch (err) {
            // ignore
@@ -67,17 +75,27 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
   };
 
   const handleSelect = (suggestion: string) => {
-    onChange(suggestion);
+    let finalValue = suggestion;
+    
+    // If using separator, append to the existing prefix
+    if (separator) {
+        if (value.lastIndexOf(separator) > -1) {
+            const prefix = value.substring(0, value.lastIndexOf(separator) + 1);
+            finalValue = prefix + suggestion;
+        }
+        // Auto-add separator to allow immediate next input
+        finalValue += separator;
+    }
+
+    onChange(finalValue);
     setIsOpen(false);
-    if (onConfirm) onConfirm(suggestion);
+    if (onConfirm) onConfirm(finalValue);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') {
           setIsOpen(false);
-          // Confirm with CURRENT value if no suggestion selected, or just always confirm current value
           if (onConfirm) onConfirm(value);
-          // e.currentTarget.blur(); // Optional: remove focus after enter? Maybe not for rapid entry.
       }
   };
 
@@ -91,9 +109,21 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
         onKeyDown={handleKeyDown}
         onFocus={() => {
              // Show default suggestions on focus
-             const defaults = staticSuggestions.slice(0, 10);
-             if(defaults.length > 0) {
-                 setActiveSuggestions(defaults);
+             // If separator, check last segment
+             let query = value;
+             if (separator && value.lastIndexOf(separator) > -1) {
+                 query = value.substring(value.lastIndexOf(separator) + 1);
+             }
+             
+             let matches = [];
+             if (query.trim().length > 0) {
+                 matches = staticSuggestions.filter(s => s.toLowerCase().includes(query.toLowerCase())).slice(0, 10);
+             } else {
+                 matches = staticSuggestions.slice(0, 10);
+             }
+             
+             if(matches.length > 0) {
+                 setActiveSuggestions(matches);
                  setIsOpen(true);
              }
         }}
@@ -104,10 +134,10 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
           {activeSuggestions.map((suggestion, index) => (
             <li
               key={index}
+              onMouseDown={(e) => e.preventDefault()} // Prevent input blur on selection
               onClick={() => handleSelect(suggestion)}
               className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm flex items-center gap-2 text-gray-700"
             >
-               {/* Simple icon logic: if likely history (in static list) use History, else Search */}
                <History size={14} className="text-gray-400"/> 
                {suggestion}
             </li>
