@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+import logging
 
 from ..auth import create_access_token, hash_password, verify_password
 from ..deps import get_db, get_current_user
 from ..models import User
 from ..schemas import AuthResponse, LoginRequest, RegisterRequest, UserOut
 
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 def _to_user_out(user: User) -> UserOut:
@@ -21,21 +24,26 @@ def _to_user_out(user: User) -> UserOut:
 
 @router.post("/register", response_model=AuthResponse)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
-    existing = db.query(User).filter(User.username == payload.username).first()
-    if existing:
-        return AuthResponse(success=False, message="用户名已存在")
+    try:
+        existing = db.query(User).filter(User.username == payload.username).first()
+        if existing:
+            return AuthResponse(success=False, message="用户名已存在")
 
-    new_user = User(
-        username=payload.username,
-        password_hash=hash_password(payload.password),
-        role="user",
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+        new_user = User(
+            username=payload.username,
+            password_hash=hash_password(payload.password),
+            role="user",
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
 
-    token = create_access_token(new_user.username, new_user.role)
-    return AuthResponse(success=True, message="注册成功", user=_to_user_out(new_user), token=token)
+        token = create_access_token(new_user.username, new_user.role)
+        return AuthResponse(success=True, message="注册成功", user=_to_user_out(new_user), token=token)
+    except Exception as e:
+        logger.error(f"Registration error: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/login", response_model=AuthResponse)

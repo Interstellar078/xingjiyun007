@@ -1,18 +1,39 @@
-
 import React, { useState } from 'react';
-import { User, Lock, LogIn, UserPlus } from 'lucide-react';
+import { User, Lock, Mail, Eye, EyeOff, X, ArrowRight, Loader2 } from 'lucide-react';
 import { AuthService } from '../services/authService';
 import { User as UserType } from '../types';
 
 interface AuthModalProps {
+  isOpen: boolean;
+  onClose: () => void;
   onLoginSuccess: (user: UserType) => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ onLoginSuccess }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Form State
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+
+  if (!isOpen) return null;
+
+  const resetForm = () => {
+    setUsername('');
+    setPassword('');
+    setConfirmPassword('');
+    setError('');
+    setIsLoading(false);
+  };
+
+  const toggleMode = () => {
+    setIsLogin(!isLogin);
+    resetForm();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,103 +44,181 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLoginSuccess }) => {
       return;
     }
 
-    if (isLogin) {
-      const result = await AuthService.login(username, password);
-      if (result.success && result.user) {
-        onLoginSuccess(result.user);
+    if (!isLogin && password !== confirmPassword) {
+      setError('两次输入的密码不一致');
+      return;
+    }
+
+    if (!isLogin && password.length < 6) {
+      setError('密码长度至少为 6 位');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      if (isLogin) {
+        const result = await AuthService.login(username, password);
+        if (result.success && result.user) {
+          onLoginSuccess(result.user);
+          onClose();
+        } else {
+          setError(result.message || '登录失败，请重试');
+        }
       } else {
-        setError(result.message);
+        const result = await AuthService.register(username, password);
+        if (result.success && result.user && result.token) {
+          // Auto login
+          import('../services/apiClient').then(({ setAuthToken }) => {
+            setAuthToken(result.token || null);
+          });
+          onLoginSuccess(result.user);
+          onClose();
+        } else {
+          setError(result.message || '注册失败，请重试');
+        }
       }
-    } else {
-      const result = await AuthService.register(username, password);
-      if (result.success) {
-        alert('注册成功，请登录');
-        setIsLogin(true);
-        setPassword('');
-      } else {
-        setError(result.message);
-      }
+    } catch (err) {
+      setError('发生网络错误，请稍后重试');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-900 bg-opacity-90 z-[100] flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-8 text-center">
-          <h2 className="text-2xl font-bold text-white mb-2">星际云旅行</h2>
-          <p className="text-blue-100 text-sm">行程定制报价核算系统</p>
-        </div>
-        
-        <div className="p-8">
-          <div className="flex justify-center mb-6">
-            <div className="bg-gray-100 p-1 rounded-lg flex">
-              <button 
-                onClick={() => { setIsLogin(true); setError(''); }}
-                className={`px-6 py-2 rounded-md text-sm font-medium transition-all ${isLogin ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                登录
-              </button>
-              <button 
-                onClick={() => { setIsLogin(false); setError(''); }}
-                className={`px-6 py-2 rounded-md text-sm font-medium transition-all ${!isLogin ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                注册
-              </button>
-            </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
+        onClick={onClose}
+      />
+
+      {/* Modal Card */}
+      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden transform transition-all scale-100 opacity-100">
+
+        {/* Close Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors z-10"
+        >
+          <X size={20} />
+        </button>
+
+        <div className="p-8 sm:p-10">
+          {/* Header */}
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">
+              {isLogin ? '欢迎回来' : '创建账号'}
+            </h2>
+            <p className="text-gray-500 text-sm">
+              {isLogin ? '登录以继续管理您的行程' : '开始您的星际云旅行体验'}
+            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">用户名</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <User size={18} className="text-gray-400" />
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Username Input */}
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-gray-700">用户名</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <User size={18} className="text-gray-400 group-focus-within:text-blue-500 transition-colors" />
                 </div>
                 <input
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  className="block w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none bg-gray-50/50 focus:bg-white"
                   placeholder="请输入用户名"
+                  autoComplete="username"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">密码</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock size={18} className="text-gray-400" />
+            {/* Password Input */}
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-gray-700">
+                {isLogin ? '密码' : '设置密码'}
+              </label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Lock size={18} className="text-gray-400 group-focus-within:text-blue-500 transition-colors" />
                 </div>
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  className="block w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none bg-gray-50/50 focus:bg-white"
                   placeholder="请输入密码"
+                  autoComplete={isLogin ? "current-password" : "new-password"}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
             </div>
 
+            {/* Confirm Password (Register Only) */}
+            {!isLogin && (
+              <div className="space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-300">
+                <label className="block text-sm font-medium text-gray-700">确认密码</label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                    <Lock size={18} className="text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                  </div>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none bg-gray-50/50 focus:bg-white"
+                    placeholder="请再次输入密码"
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Error Message */}
             {error && (
-              <div className="text-red-500 text-xs text-center bg-red-50 p-2 rounded">
+              <div className="p-3 bg-red-50 border border-red-100 text-red-600 text-sm rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
+                <div className="w-1 h-1 rounded-full bg-red-500 shrink-0" />
                 {error}
               </div>
             )}
 
+            {/* Submit Button */}
             <button
               type="submit"
-              className="w-full flex justify-center items-center gap-2 py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+              disabled={isLoading}
+              className="w-full relative flex justify-center items-center gap-2 py-3 px-4 border border-transparent rounded-xl shadow-lg shadow-blue-500/20 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              {isLogin ? <LogIn size={18} /> : <UserPlus size={18} />}
-              {isLogin ? '安全登录' : '创建账号'}
+              {isLoading ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <>
+                  {isLogin ? '立即登录' : '创建账号'}
+                  <ArrowRight size={16} className="opacity-80" />
+                </>
+              )}
             </button>
           </form>
-        </div>
-        <div className="px-8 py-4 bg-gray-50 border-t border-gray-100 text-center">
-             <p className="text-xs text-gray-400">
-                 {isLogin ? "专业行程定制系统" : "注册后即为普通用户权限"}
-             </p>
+
+          {/* Footer / Toggle Mode */}
+          <div className="mt-8 text-center">
+            <p className="text-sm text-gray-500">
+              {isLogin ? '还可以没有账号？' : '已经有账号了？'}
+              <button
+                onClick={toggleMode}
+                className="ml-1.5 font-medium text-blue-600 hover:text-blue-700 hover:underline transition-colors focus:outline-none"
+              >
+                {isLogin ? '免费注册' : '直接登录'}
+              </button>
+            </p>
+          </div>
         </div>
       </div>
     </div>

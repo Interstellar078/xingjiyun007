@@ -15,13 +15,18 @@ export const AuthService = {
         }
     },
 
-    register: async (username: string, password: string): Promise<{ success: boolean, message: string }> => {
+    register: async (username: string, password: string): Promise<{ success: boolean, message: string, user?: User, token?: string }> => {
         try {
-            const result = await apiPost<{ success: boolean; message: string }>(`/api/auth/register`, {
+            const result = await apiPost<{ success: boolean; message: string; user?: User; token?: string }>(`/api/auth/register`, {
                 username,
                 password
             });
-            return { success: result.success, message: result.message };
+            return {
+                success: result.success,
+                message: result.message,
+                user: result.user,
+                token: result.token
+            };
         } catch (err: any) {
             return { success: false, message: err.message || '注册失败' };
         }

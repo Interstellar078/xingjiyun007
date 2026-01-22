@@ -28,17 +28,26 @@ def configure_logging(level: str = "INFO", json_format: bool = False) -> None:
             "console": {
                 "class": "logging.StreamHandler",
                 "formatter": formatter,
-            }
+            },
+            "file": {
+                "class": "logging.handlers.TimedRotatingFileHandler",
+                "filename": "app.log",
+                "when": "midnight",
+                "interval": 1,
+                "backupCount": 30,
+                "formatter": formatter,
+                "encoding": "utf-8",
+            },
         },
         "root": {
-            "handlers": ["console"],
+            "handlers": ["console", "file"],
             "level": level,
         },
         "loggers": {
-            "uvicorn": {"handlers": ["console"], "level": level, "propagate": False},
-            "uvicorn.error": {"handlers": ["console"], "level": level, "propagate": False},
+            "uvicorn": {"handlers": ["console", "file"], "level": level, "propagate": False},
+            "uvicorn.error": {"handlers": ["console", "file"], "level": level, "propagate": False},
             "uvicorn.access": {
-                "handlers": ["console"],
+                "handlers": ["console", "file"],
                 "level": "INFO" if level != "DEBUG" else "DEBUG",
                 "propagate": False,
             },
