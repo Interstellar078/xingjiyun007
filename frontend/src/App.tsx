@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { User } from './types';
 import { DashboardLayout } from './components/Layout/DashboardLayout';
 import { LandingPage } from './components/LandingPage';
@@ -9,7 +10,7 @@ import { useCloudStorage } from './hooks/useCloudStorage';
 import { useTripPlanner } from './hooks/useTripPlanner';
 import { useTripManagement } from './hooks/useTripManagement';
 
-// Import views (will be created/exist)
+// Import views
 import { PlannerViewOriginal } from './views/PlannerViewOriginal';
 import { MyTripsView } from './views/MyTripsView';
 import { ResourcesView } from './views/ResourcesView';
@@ -19,22 +20,21 @@ import { SystemSettingsView } from './views/SystemSettingsView';
 
 /**
  * Main App Component - Framework Only
- * 
- * Responsibilities:
- * - Authentication management
- * - Top-level routing between views
- * - Cloud storage coordination via hooks
- * 
- * All view-specific logic is delegated to view components.
  */
 export default function App() {
+    // ==================== Router Hooks ====================
+    const navigate = useNavigate();
+    const location = useLocation();
+
     // ==================== Auth State ====================
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
-    const [currentView, setCurrentView] = useState('planner');
 
-    // ==================== Hooks ====================
+    // Derive current view from path (strip leading slash)
+    // defaulting to 'planner' or 'dashboard' is handled by redirects
+    const currentView = location.pathname.substring(1) || 'planner';
+
     // ==================== Hooks ====================
     const cloudStorage = useCloudStorage(currentUser);
     const tripPlanner = useTripPlanner(
@@ -63,30 +63,40 @@ export default function App() {
             setCurrentUser(user);
 
             if (user) {
-                // If user is admin, default to dashboard. Otherwise planner.
-                if (user.role === 'admin') {
-                    setCurrentView('dashboard');
-                } else {
-                    setCurrentView('planner');
+                // If at root path, redirect based on role
+                if (location.pathname === '/' || location.pathname === '') {
+                    if (user.role === 'admin') {
+                        navigate('/dashboard', { replace: true });
+                    } else {
+                        navigate('/planner', { replace: true });
+                    }
                 }
                 await cloudStorage.loadCloudData();
+            } else {
+                // Not logged in? Landing page handles it, 
+                // but if we are at deeply nested path? 
+                // We might want to persist it or redirect to home.
+                // For now, Landing Page is shown conditionally below.
             }
 
             cloudStorage.setIsAppLoading(false);
         };
 
         checkAuth();
-    }, []);
+    }, []); // Run once on mount
 
     // ==================== Auth Handlers ====================
     const handleLoginSuccess = async (user: User) => {
         setCurrentUser(user);
         setShowAuthModal(false);
+
+        // Redirect logic
         if (user.role === 'admin') {
-            setCurrentView('dashboard');
+            navigate('/dashboard');
         } else {
-            setCurrentView('planner');
+            navigate('/planner');
         }
+
         cloudStorage.setIsAppLoading(true);
         await cloudStorage.loadCloudData();
         cloudStorage.setIsAppLoading(false);
@@ -95,7 +105,11 @@ export default function App() {
     const handleLogout = async () => {
         await AuthService.logout();
         setCurrentUser(null);
-        setCurrentView('planner');
+        navigate('/');
+    };
+
+    const handleViewChange = (view: string) => {
+        navigate(`/${view}`);
     };
 
     // ==================== Loading State ====================
@@ -114,16 +128,19 @@ export default function App() {
     if (!currentUser) {
         return (
             <>
-                <LandingPage
-                    onLoginClick={() => {
-                        setAuthModalMode('login');
-                        setShowAuthModal(true);
-                    }}
-                    onRegisterClick={() => {
-                        setAuthModalMode('register');
-                        setShowAuthModal(true);
-                    }}
-                />
+                <Routes>
+                    <Route path="*" element={<LandingPage
+                        onLoginClick={() => {
+                            setAuthModalMode('login');
+                            setShowAuthModal(true);
+                        }}
+                        onRegisterClick={() => {
+                            setAuthModalMode('register');
+                            setShowAuthModal(true);
+                        }}
+                    />} />
+                </Routes>
+
                 <AuthModal
                     isOpen={showAuthModal}
                     onClose={() => setShowAuthModal(false)}
@@ -139,58 +156,54 @@ export default function App() {
         <DashboardLayout
             userRole={currentUser.role}
             currentView={currentView}
-            onViewChange={setCurrentView}
+            onViewChange={handleViewChange}
             currentUser={currentUser}
             onLogout={handleLogout}
         >
-            {/* Planner View - Original Implementation */}
-            {currentView === 'planner' && (
-                <PlannerViewOriginal
-                    currentUser={currentUser}
-                    tripPlanner={tripPlanner}
-                    tripManagement={tripManagement}
-                    cloudStorage={cloudStorage}
-                    onViewChange={setCurrentView}
-                />
-            )}
+            <Routes>
+                <Route path="/planner" element={
+                    <PlannerViewOriginal
+                        currentUser={currentUser}
+                        tripPlanner={tripPlanner}
+                        tripManagement={tripManagement}
+                        cloudStorage={cloudStorage}
+                        onViewChange={(view) => navigate(`/${view}`)}
+                    />
+                } />
 
-            {/* My Trips View */}
-            {currentView === 'my-trips' && (
-                <MyTripsView
-                    currentUser={currentUser}
-                    savedTrips={cloudStorage.data.savedTrips}
-                    publicTrips={cloudStorage.data.publicTrips}
-                    onLoadTrip={(trip) => {
-                        tripManagement.loadTrip(trip);
-                        setCurrentView('planner');
-                    }}
-                    onDeleteTrip={(id, isPublic) => tripManagement.deleteTrip(id, isPublic)}
-                    onPromoteTrip={(trip) => tripManagement.promoteToPublic(trip)}
-                />
-            )}
+                <Route path="/my-trips" element={
+                    <MyTripsView
+                        currentUser={currentUser}
+                        savedTrips={cloudStorage.data.savedTrips}
+                        publicTrips={cloudStorage.data.publicTrips}
+                        onLoadTrip={(trip) => {
+                            tripManagement.loadTrip(trip);
+                            navigate('/planner');
+                        }}
+                        onDeleteTrip={(id, isPublic) => tripManagement.deleteTrip(id, isPublic)}
+                        onPromoteTrip={(trip) => tripManagement.promoteToPublic(trip)}
+                    />
+                } />
 
-            {/* Resources View */}
-            {currentView === 'resources' && (
-                <ResourcesView
-                    currentUser={currentUser}
-                    cloudStorage={cloudStorage}
-                />
-            )}
+                <Route path="/resources" element={
+                    <ResourcesView
+                        currentUser={currentUser}
+                        cloudStorage={cloudStorage}
+                    />
+                } />
 
-            {/* Users Management View (Admin Only) */}
-            {currentView === 'users' && currentUser.role === 'admin' && (
-                <UsersView currentUser={currentUser} />
-            )}
+                {/* Admin Routes */}
+                {currentUser.role === 'admin' && (
+                    <>
+                        <Route path="/users" element={<UsersView currentUser={currentUser} />} />
+                        <Route path="/dashboard" element={<DashboardView />} />
+                        <Route path="/settings" element={<SystemSettingsView />} />
+                    </>
+                )}
 
-            {/* Dashboard View (Admin Only) */}
-            {currentView === 'dashboard' && currentUser.role === 'admin' && (
-                <DashboardView />
-            )}
-
-            {/* System Settings View (Admin Only) */}
-            {currentView === 'settings' && currentUser.role === 'admin' && (
-                <SystemSettingsView />
-            )}
+                {/* Default Redirect */}
+                <Route path="*" element={<Navigate to={currentUser.role === 'admin' ? "/dashboard" : "/planner"} replace />} />
+            </Routes>
         </DashboardLayout>
     );
 }
