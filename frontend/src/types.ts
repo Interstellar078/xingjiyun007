@@ -29,7 +29,7 @@ export interface DayRow {
   activityName: string[]; // Multi-select Activity Names
   description: string; // New: Itinerary Details
   rooms: number;
-  
+
   // Costs
   transportCost: number;
   hotelPrice: number; // Unit price
@@ -37,7 +37,7 @@ export interface DayRow {
   ticketCost: number; // Calculated: sum(unit_prices) * peopleCount
   activityCost: number; // Calculated: sum(unit_prices) * peopleCount
   otherCost: number;
-  
+
   // Custom dynamic costs
   customCosts: Record<string, number>; // Key is custom column ID
 }
@@ -69,7 +69,7 @@ export interface TripSettings {
   startDate: string;
   marginPercent: number; // e.g., 20 for 20%
   tipPerDay: number;
-  
+
   // Manual Overrides
   manualTotalPrice?: number;
   manualInclusions?: string;

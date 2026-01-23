@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, Integer, Text
+from sqlalchemy import String, DateTime, Integer, Text, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,8 +12,10 @@ from .db import Base
 class AppData(Base):
     __tablename__ = "app_data"
 
+    owner_id: Mapped[str] = mapped_column(String(120), primary_key=True)
     key: Mapped[str] = mapped_column(String(255), primary_key=True)
     value: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.utcnow,

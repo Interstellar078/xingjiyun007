@@ -32,11 +32,13 @@ class AuthResponse(BaseModel):
 class DataItem(BaseModel):
     key: str
     value: Any
+    is_public: bool = False
     updated_at: datetime | None = None
 
 
 class DataUpsert(BaseModel):
     value: Any
+    is_public: bool = False
 
 
 class DataRestoreRequest(BaseModel):
