@@ -42,7 +42,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                         {currentView === 'planner' ? '行程规划' :
                             currentView === 'my-trips' ? '我的行程' :
                                 currentView === 'resources' ? '资源库' :
-                                    currentView === 'dashboard' ? '控制台' :
+                                    currentView === 'dashboard' ? '数据看板' :
                                         currentView === 'users' ? '用户管理' :
                                             currentView === 'settings' ? '系统设置' : '星际云旅行'}
                     </h2>

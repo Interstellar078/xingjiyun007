@@ -1,7 +1,7 @@
 import { SavedTrip, CarCostEntry, PoiCity, PoiSpot, PoiHotel, PoiActivity, CountryFile } from '../types';
 import { apiGet, apiPut, apiPost } from './apiClient';
 
-const KEYS = {
+export const KEYS = {
   DB_CARS: 'travel_builder_db_cars',
   DB_CITIES: 'travel_builder_db_poi_cities',
   DB_SPOTS: 'travel_builder_db_poi_spots',
@@ -9,21 +9,27 @@ const KEYS = {
   DB_ACTIVITIES: 'travel_builder_db_poi_activities',
   DB_FILES: 'travel_builder_db_country_files',
   HISTORY: 'travel_builder_history',
+  PUBLIC_TRIPS: 'travel_builder_public_trips', // New Key for Official Public Library
   LOCATIONS: 'travel_builder_locations_history',
   SETTINGS_GLOBAL: 'travel_builder_settings_global'
 };
 
-const getData = async <T>(key: string, fallback: T): Promise<T> => {
+const getData = async <T>(key: string, fallback: T, scope?: 'public' | 'private'): Promise<T> => {
   try {
-    const data = await apiGet<{ key: string; value: T }>(`/api/data/${encodeURIComponent(key)}`);
+    const url = scope
+      ? `/api/data/${encodeURIComponent(key)}?scope=${scope}`
+      : `/api/data/${encodeURIComponent(key)}`;
+    const data = await apiGet<{ key: string; value: T }>(url);
     return data?.value ?? fallback;
   } catch {
     return fallback;
   }
 };
 
-const setData = async <T>(key: string, value: T): Promise<void> => {
-  await apiPut(`/api/data/${encodeURIComponent(key)}`, { value });
+const setData = async <T>(key: string, value: T, isPublic: boolean = false): Promise<void> => {
+  // When saving, we must specify is_public flag. 
+  // For overlay logic: Private saves go to owner_id=me. Public saves go to owner_id=me, is_public=true.
+  await apiPut(`/api/data/${encodeURIComponent(key)}`, { value, is_public: isPublic });
 };
 
 export const StorageService = {
@@ -35,15 +41,28 @@ export const StorageService = {
   async getActivities(): Promise<PoiActivity[]> { return getData(KEYS.DB_ACTIVITIES, []); },
   async getFiles(): Promise<CountryFile[]> { return getData(KEYS.DB_FILES, []); },
   async getTrips(): Promise<SavedTrip[]> { return getData(KEYS.HISTORY, []); },
+  async getPublicTrips(): Promise<SavedTrip[]> { return getData(KEYS.PUBLIC_TRIPS, []); },
   async getLocations(): Promise<string[]> { return getData(KEYS.LOCATIONS, []); },
 
-  async saveCars(data: CarCostEntry[]): Promise<void> { return setData(KEYS.DB_CARS, data); },
-  async saveCities(data: PoiCity[]): Promise<void> { return setData(KEYS.DB_CITIES, data); },
-  async saveSpots(data: PoiSpot[]): Promise<void> { return setData(KEYS.DB_SPOTS, data); },
-  async saveHotels(data: PoiHotel[]): Promise<void> { return setData(KEYS.DB_HOTELS, data); },
-  async saveActivities(data: PoiActivity[]): Promise<void> { return setData(KEYS.DB_ACTIVITIES, data); },
-  async saveFiles(data: CountryFile[]): Promise<void> { return setData(KEYS.DB_FILES, data); },
+  // --- Admin ---
+  async adminGetAllKeys(key: string): Promise<{ owner_id: string, value: any, is_public: boolean }[]> {
+    return apiGet(`/api/admin/data/all?key=${encodeURIComponent(key)}`);
+  },
+
+  // --- Scoped Data Access ---
+  async getPublicData<T>(key: string): Promise<T> { return getData(key, [] as any, 'public'); },
+  async getPrivateData<T>(key: string): Promise<T> { return getData(key, [] as any, 'private'); },
+
+  // --- Saving ---
+  async saveCars(data: CarCostEntry[], isPublic = false): Promise<void> { return setData(KEYS.DB_CARS, data, isPublic); },
+  async saveCities(data: PoiCity[], isPublic = false): Promise<void> { return setData(KEYS.DB_CITIES, data, isPublic); },
+  async saveSpots(data: PoiSpot[], isPublic = false): Promise<void> { return setData(KEYS.DB_SPOTS, data, isPublic); },
+  async saveHotels(data: PoiHotel[], isPublic = false): Promise<void> { return setData(KEYS.DB_HOTELS, data, isPublic); },
+  async saveActivities(data: PoiActivity[], isPublic = false): Promise<void> { return setData(KEYS.DB_ACTIVITIES, data, isPublic); },
+  async saveFiles(data: CountryFile[], isPublic = false): Promise<void> { return setData(KEYS.DB_FILES, data, isPublic); },
+
   async saveTrips(data: SavedTrip[]): Promise<void> { return setData(KEYS.HISTORY, data); },
+  async savePublicTrips(data: SavedTrip[]): Promise<void> { return setData(KEYS.PUBLIC_TRIPS, data, true); }, // Always public
   async saveLocations(data: string[]): Promise<void> { return setData(KEYS.LOCATIONS, data); },
 
   async getAppSettings(): Promise<any> {

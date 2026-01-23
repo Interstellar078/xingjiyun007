@@ -35,7 +35,8 @@ export default function App() {
     const [currentView, setCurrentView] = useState('planner');
 
     // ==================== Hooks ====================
-    const cloudStorage = useCloudStorage();
+    // ==================== Hooks ====================
+    const cloudStorage = useCloudStorage(currentUser);
     const tripPlanner = useTripPlanner(
         currentUser,
         cloudStorage.data.locationHistory,
@@ -45,6 +46,8 @@ export default function App() {
         currentUser,
         cloudStorage.data.savedTrips,
         cloudStorage.actions.setSavedTrips,
+        cloudStorage.data.publicTrips,
+        cloudStorage.actions.setPublicTrips,
         tripPlanner.settings,
         tripPlanner.rows,
         tripPlanner.customColumns,
@@ -60,6 +63,12 @@ export default function App() {
             setCurrentUser(user);
 
             if (user) {
+                // If user is admin, default to dashboard. Otherwise planner.
+                if (user.role === 'admin') {
+                    setCurrentView('dashboard');
+                } else {
+                    setCurrentView('planner');
+                }
                 await cloudStorage.loadCloudData();
             }
 
@@ -73,6 +82,11 @@ export default function App() {
     const handleLoginSuccess = async (user: User) => {
         setCurrentUser(user);
         setShowAuthModal(false);
+        if (user.role === 'admin') {
+            setCurrentView('dashboard');
+        } else {
+            setCurrentView('planner');
+        }
         cloudStorage.setIsAppLoading(true);
         await cloudStorage.loadCloudData();
         cloudStorage.setIsAppLoading(false);
@@ -143,12 +157,15 @@ export default function App() {
             {/* My Trips View */}
             {currentView === 'my-trips' && (
                 <MyTripsView
+                    currentUser={currentUser}
                     savedTrips={cloudStorage.data.savedTrips}
+                    publicTrips={cloudStorage.data.publicTrips}
                     onLoadTrip={(trip) => {
                         tripManagement.loadTrip(trip);
                         setCurrentView('planner');
                     }}
-                    onDeleteTrip={tripManagement.deleteTrip}
+                    onDeleteTrip={(id, isPublic) => tripManagement.deleteTrip(id, isPublic)}
+                    onPromoteTrip={(trip) => tripManagement.promoteToPublic(trip)}
                 />
             )}
 

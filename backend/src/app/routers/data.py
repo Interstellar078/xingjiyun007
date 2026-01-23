@@ -18,14 +18,18 @@ router = APIRouter(prefix="/api/data", tags=["data"])
 @router.get("/{key}", response_model=DataItem)
 def get_data(
     key: str, 
+    scope: Optional[str] = Query(None, regex="^(private|public)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> DataItem:
-    # 1. Try to find private data first (Overlay logic)
-    item = db.get(AppData, (current_user.username, key))
+    item = None
+
+    if scope == "private":
+        # Force fetch private
+        item = db.get(AppData, (current_user.username, key))
     
-    # 2. If not found, look for public data
-    if not item:
+    elif scope == "public":
+        # Force fetch public
         item = db.scalar(
             select(AppData).where(
                 AppData.key == key,
@@ -33,7 +37,21 @@ def get_data(
             ).limit(1)
         )
     
+    else:
+        # Default Overlay Logic (Priority: Private > Public)
+        item = db.get(AppData, (current_user.username, key))
+        if not item:
+            item = db.scalar(
+                select(AppData).where(
+                    AppData.key == key,
+                    AppData.is_public == True
+                ).limit(1)
+            )
+    
     if not item:
+        # Return empty/default structure instead of 404 to simplify frontend merging
+        # determining default based on key existence elsewhere is hard, so we throw 404 
+        # but frontend needs to handle it gracefully
         raise HTTPException(status_code=404, detail="Key not found")
         
     return DataItem(

@@ -29,7 +29,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
 
     const menuItems = userRole === 'admin' ? [
-        { id: 'dashboard', label: '控制台', icon: LayoutDashboard },
+        { id: 'dashboard', label: '数据看板', icon: LayoutDashboard },
+        { id: 'planner', label: '行程规划', icon: Map },
+        { id: 'my-trips', label: '我的行程', icon: FolderOpen },
         { id: 'users', label: '用户管理', icon: Users },
         { id: 'resources', label: '资源库', icon: Database },
         { id: 'settings', label: '系统设置', icon: Settings },
@@ -67,8 +69,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             key={item.id}
                             onClick={() => onViewChange(item.id)}
                             className={`w-full flex items-center px-4 py-3 transition-colors relative group ${isActive
-                                    ? 'bg-blue-600/20 text-blue-400'
-                                    : 'text-gray-400 hover:bg-slate-800 hover:text-white'
+                                ? 'bg-blue-600/20 text-blue-400'
+                                : 'text-gray-400 hover:bg-slate-800 hover:text-white'
                                 }`}
                             title={collapsed ? item.label : ''}
                         >

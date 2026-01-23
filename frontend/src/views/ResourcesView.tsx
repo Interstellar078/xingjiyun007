@@ -35,7 +35,8 @@ export function ResourcesView({ currentUser, cloudStorage }: ResourcesViewProps)
                 onUpdatePoiActivities={actions.setPoiActivities}
                 countryFiles={data.countryFiles}
                 onUpdateCountryFiles={actions.setCountryFiles}
-                isReadOnly={currentUser.role !== 'admin'}
+                isAdmin={currentUser.role === 'admin'}
+                isReadOnly={false}
             />
         </div>
     );

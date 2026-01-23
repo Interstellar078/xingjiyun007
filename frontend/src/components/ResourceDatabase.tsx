@@ -25,6 +25,7 @@ interface ResourceDatabaseProps {
     onUpdateCountryFiles: (files: CountryFile[]) => void; // New prop
     // Permissions
     isReadOnly?: boolean;
+    isAdmin?: boolean;
     // Layout Mode
     variant?: 'modal' | 'page';
 }
@@ -34,8 +35,13 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
     carDB, poiCities, poiSpots, poiHotels, poiActivities, countryFiles,
     onUpdateCarDB, onUpdatePoiCities, onUpdatePoiSpots, onUpdatePoiHotels, onUpdatePoiActivities, onUpdateCountryFiles,
     isReadOnly = false,
+    isAdmin = false,
     variant = 'modal'
 }) => {
+    // Helper to check if item is locked (Public item for Non-Admin)
+    const isLocked = (item: any) => {
+        return (item._source === 'public' && !isAdmin);
+    };
     // Navigation State
     const [selectedCountry, setSelectedCountry] = useState<string>('');
     const [selectedCityId, setSelectedCityId] = useState<string>('');
@@ -660,7 +666,9 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                 serviceType: '包车',
                 passengers: 4,
                 priceLow: 2000,
-                priceHigh: 2000
+                priceHigh: 2000,
+                // @ts-ignore
+                _source: isAdmin ? 'public' : 'private'
             };
             onUpdateCarDB([...carDB, newCarEntry]);
         }
@@ -743,7 +751,9 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
             cityId: selectedCityId,
             name: hotelName === "未命名酒店" ? "" : hotelName,
             roomType: '新房型',
-            price: 0
+            price: 0,
+            // @ts-ignore
+            _source: isAdmin ? 'public' : 'private'
         };
         onUpdatePoiHotels([...poiHotels, newRoom]);
     };
@@ -754,7 +764,9 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
             cityId: selectedCityId,
             name: '新酒店',
             roomType: '标准间',
-            price: 0
+            price: 0,
+            // @ts-ignore
+            _source: isAdmin ? 'public' : 'private'
         };
         onUpdatePoiHotels([...poiHotels, newRoom]);
     };
@@ -768,15 +780,18 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
     // Other Add Actions
     const addCar = () => {
         if (isReadOnly) return;
-        onUpdateCarDB([...carDB, { id: generateUUID(), region: selectedCountry, carModel: '', serviceType: '包车', passengers: 4, priceLow: 0, priceHigh: 0 }]);
+        // @ts-ignore
+        onUpdateCarDB([...carDB, { id: generateUUID(), region: selectedCountry, carModel: '', serviceType: '包车', passengers: 4, priceLow: 0, priceHigh: 0, _source: isAdmin ? 'public' : 'private' }]);
     }
     const addSpot = () => {
         if (isReadOnly) return;
-        onUpdatePoiSpots([...poiSpots, { id: generateUUID(), cityId: selectedCityId, name: '', price: 0 }]);
+        // @ts-ignore
+        onUpdatePoiSpots([...poiSpots, { id: generateUUID(), cityId: selectedCityId, name: '', price: 0, _source: isAdmin ? 'public' : 'private' }]);
     }
     const addActivity = () => {
         if (isReadOnly) return;
-        onUpdatePoiActivities([...poiActivities, { id: generateUUID(), cityId: selectedCityId, name: '', price: 0 }]);
+        // @ts-ignore
+        onUpdatePoiActivities([...poiActivities, { id: generateUUID(), cityId: selectedCityId, name: '', price: 0, _source: isAdmin ? 'public' : 'private' }]);
     }
 
     // Sidebar List
@@ -908,10 +923,16 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                 <tbody className="divide-y divide-gray-200">
                                                     {currentCars.map(row => (
                                                         <tr key={row.id}>
-                                                            <td className="px-6 py-2"><input disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={row.carModel} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { carModel: e.target.value })} placeholder="车型" /></td>
+                                                            <td className="px-6 py-2">
+                                                                <div className="flex flex-col">
+                                                                    <input disabled={isReadOnly || isLocked(row)} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={row.carModel} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { carModel: e.target.value })} placeholder="车型" />
+                                                                    {/* @ts-ignore */}
+                                                                    <span className={`text-[10px] scale-90 origin-left ${row._source === 'public' ? 'text-blue-500 font-medium' : 'text-gray-400'}`}>{row._source === 'public' ? '公有' : '私有'}</span>
+                                                                </div>
+                                                            </td>
                                                             <td className="px-6 py-2">
                                                                 <select
-                                                                    disabled={isReadOnly}
+                                                                    disabled={isReadOnly || isLocked(row)}
                                                                     className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500"
                                                                     value={row.serviceType}
                                                                     onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { serviceType: e.target.value })}
@@ -923,10 +944,10 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                                     <option value="其它">其它</option>
                                                                 </select>
                                                             </td>
-                                                            <td className="px-6 py-2"><input disabled={isReadOnly} type="number" min="1" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={row.passengers} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { passengers: parseFloat(e.target.value) || 0 })} /></td>
-                                                            <td className="px-6 py-2"><input disabled={isReadOnly} type="number" className="w-full text-sm border-gray-300 rounded text-blue-600 disabled:bg-gray-50 disabled:text-gray-500" value={row.priceLow} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { priceLow: parseFloat(e.target.value) || 0 })} /></td>
-                                                            <td className="px-6 py-2"><input disabled={isReadOnly} type="number" className="w-full text-sm border-gray-300 rounded text-red-600 disabled:bg-gray-50 disabled:text-gray-500" value={row.priceHigh} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { priceHigh: parseFloat(e.target.value) || 0 })} /></td>
-                                                            <td className="px-6 text-center">{!isReadOnly && <button onClick={() => deleteItem(carDB, onUpdateCarDB, row.id, '车型配置')}><Trash2 size={16} className="text-gray-300 hover:text-red-500" /></button>}</td>
+                                                            <td className="px-6 py-2"><input disabled={isReadOnly || isLocked(row)} type="number" min="1" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={row.passengers} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { passengers: parseFloat(e.target.value) || 0 })} /></td>
+                                                            <td className="px-6 py-2"><input disabled={isReadOnly || isLocked(row)} type="number" className="w-full text-sm border-gray-300 rounded text-blue-600 disabled:bg-gray-50 disabled:text-gray-500" value={row.priceLow} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { priceLow: parseFloat(e.target.value) || 0 })} /></td>
+                                                            <td className="px-6 py-2"><input disabled={isReadOnly || isLocked(row)} type="number" className="w-full text-sm border-gray-300 rounded text-red-600 disabled:bg-gray-50 disabled:text-gray-500" value={row.priceHigh} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { priceHigh: parseFloat(e.target.value) || 0 })} /></td>
+                                                            <td className="px-6 text-center">{!isReadOnly && !isLocked(row) && <button onClick={() => deleteItem(carDB, onUpdateCarDB, row.id, '车型配置')}><Trash2 size={16} className="text-gray-300 hover:text-red-500" /></button>}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -995,15 +1016,19 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                             <div className="flex-1 overflow-y-auto">
                                                 {currentCities.map(city => (
                                                     <div key={city.id} onClick={() => setSelectedCityId(city.id)} className={`px-4 py-2 cursor-pointer text-sm flex justify-between items-center group ${selectedCityId === city.id ? 'bg-white text-blue-600 font-medium border-r-2 border-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}>
-                                                        <input
-                                                            disabled={isReadOnly}
-                                                            type="text"
-                                                            className={`w-full bg-transparent border-none focus:ring-0 p-0 text-sm cursor-pointer disabled:cursor-pointer disabled:text-gray-600 ${selectedCityId === city.id ? 'font-medium text-blue-600 placeholder-blue-400' : 'text-gray-600'}`}
-                                                            value={city.name}
-                                                            onChange={(e) => updateItem<PoiCity>(poiCities, onUpdatePoiCities, city.id, { name: e.target.value })}
-                                                            placeholder="地点名称"
-                                                        />
-                                                        {!isReadOnly && <button onClick={(e) => { e.stopPropagation(); handleDeleteCity(city.id); }} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 shrink-0 ml-2"><Trash2 size={12} /></button>}
+                                                        <div className="flex-1">
+                                                            <input
+                                                                disabled={isReadOnly || isLocked(city)}
+                                                                type="text"
+                                                                className={`w-full bg-transparent border-none focus:ring-0 p-0 text-sm cursor-pointer disabled:cursor-pointer disabled:text-gray-600 ${selectedCityId === city.id ? 'font-medium text-blue-600 placeholder-blue-400' : 'text-gray-600'}`}
+                                                                value={city.name}
+                                                                onChange={(e) => updateItem<PoiCity>(poiCities, onUpdatePoiCities, city.id, { name: e.target.value })}
+                                                                placeholder="地点名称"
+                                                            />
+                                                            {/* @ts-ignore */}
+                                                            <span className={`text-[9px] ${city._source === 'public' ? 'text-blue-500' : 'text-gray-300'}`}>{city._source === 'public' ? '公' : '私'}</span>
+                                                        </div>
+                                                        {!isReadOnly && !isLocked(city) && <button onClick={(e) => { e.stopPropagation(); handleDeleteCity(city.id); }} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 shrink-0 ml-2"><Trash2 size={12} /></button>}
                                                     </div>
                                                 ))}
                                                 {currentCities.length === 0 && <div className="p-4 text-center text-xs text-gray-400">暂无地点</div>}
@@ -1048,9 +1073,13 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                                         <tbody className="divide-y divide-gray-200">
                                                                             {currentSpots.map(item => (
                                                                                 <tr key={item.id}>
-                                                                                    <td className="px-4 py-2"><input disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.name} onChange={(e) => updateItem<PoiSpot>(poiSpots, onUpdatePoiSpots, item.id, { name: e.target.value })} placeholder="景点名称" /></td>
-                                                                                    <td className="px-4 py-2"><input disabled={isReadOnly} type="number" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.price} onChange={(e) => updateItem<PoiSpot>(poiSpots, onUpdatePoiSpots, item.id, { price: parseFloat(e.target.value) || 0 })} /></td>
-                                                                                    <td className="px-4 text-center">{!isReadOnly && <button onClick={() => deleteItem(poiSpots, onUpdatePoiSpots, item.id, '景点')}><Trash2 size={14} className="text-gray-300 hover:text-red-500" /></button>}</td>
+                                                                                    <td className="px-4 py-2">
+                                                                                        <input disabled={isReadOnly || isLocked(item)} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.name} onChange={(e) => updateItem<PoiSpot>(poiSpots, onUpdatePoiSpots, item.id, { name: e.target.value })} placeholder="景点名称" />
+                                                                                        {/* @ts-ignore */}
+                                                                                        <span className={`text-[10px] ${item._source === 'public' ? 'text-blue-500' : 'text-gray-400'}`}>{item._source === 'public' ? '公有' : '私有'}</span>
+                                                                                    </td>
+                                                                                    <td className="px-4 py-2"><input disabled={isReadOnly || isLocked(item)} type="number" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.price} onChange={(e) => updateItem<PoiSpot>(poiSpots, onUpdatePoiSpots, item.id, { price: parseFloat(e.target.value) || 0 })} /></td>
+                                                                                    <td className="px-4 text-center">{!isReadOnly && !isLocked(item) && <button onClick={() => deleteItem(poiSpots, onUpdatePoiSpots, item.id, '景点')}><Trash2 size={14} className="text-gray-300 hover:text-red-500" /></button>}</td>
                                                                                 </tr>
                                                                             ))}
                                                                         </tbody>
@@ -1100,7 +1129,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                                                             {rows.map(item => (
                                                                                                 <div key={item.id} className="flex items-center bg-blue-50 border border-blue-100 rounded px-2 py-1 gap-2">
                                                                                                     <input
-                                                                                                        disabled={isReadOnly}
+                                                                                                        disabled={isReadOnly || isLocked(item)}
                                                                                                         className="w-20 text-xs bg-transparent border-0 border-b border-blue-200 focus:ring-0 p-0 text-gray-700 disabled:border-transparent"
                                                                                                         value={item.roomType}
                                                                                                         onChange={(e) => updateItem<PoiHotel>(poiHotels, onUpdatePoiHotels, item.id, { roomType: e.target.value })}
@@ -1108,13 +1137,15 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                                                                     />
                                                                                                     <span className="text-gray-400 text-xs">:</span>
                                                                                                     <input
-                                                                                                        disabled={isReadOnly}
+                                                                                                        disabled={isReadOnly || isLocked(item)}
                                                                                                         type="number"
                                                                                                         className="w-14 text-xs bg-transparent border-0 border-b border-blue-200 focus:ring-0 p-0 font-medium text-blue-700 disabled:border-transparent disabled:text-gray-500"
                                                                                                         value={item.price}
                                                                                                         onChange={(e) => updateItem<PoiHotel>(poiHotels, onUpdatePoiHotels, item.id, { price: parseFloat(e.target.value) || 0 })}
                                                                                                     />
-                                                                                                    {!isReadOnly && <button onClick={() => deleteItem(poiHotels, onUpdatePoiHotels, item.id, '房型')} className="text-blue-300 hover:text-red-500 ml-1"><X size={12} /></button>}
+                                                                                                    {/* @ts-ignore */}
+                                                                                                    <span className={`text-[9px] ${item._source === 'public' ? 'text-blue-500' : 'text-gray-400'}`}>{item._source === 'public' ? '公' : '私'}</span>
+                                                                                                    {!isReadOnly && !isLocked(item) && <button onClick={() => deleteItem(poiHotels, onUpdatePoiHotels, item.id, '房型')} className="text-blue-300 hover:text-red-500 ml-1"><X size={12} /></button>}
                                                                                                 </div>
                                                                                             ))}
                                                                                             {!isReadOnly && <button onClick={() => addRoomToHotel(hotelName)} className="px-2 py-1 text-xs border border-dashed border-gray-300 rounded text-gray-500 hover:text-blue-600 hover:border-blue-400 transition-colors">+ 房型</button>}
@@ -1149,9 +1180,13 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                                         <tbody className="divide-y divide-gray-200">
                                                                             {currentActivities.map(item => (
                                                                                 <tr key={item.id}>
-                                                                                    <td className="px-4 py-2"><input disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.name} onChange={(e) => updateItem<PoiActivity>(poiActivities, onUpdatePoiActivities, item.id, { name: e.target.value })} placeholder="活动名称" /></td>
-                                                                                    <td className="px-4 py-2"><input disabled={isReadOnly} type="number" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.price} onChange={(e) => updateItem<PoiActivity>(poiActivities, onUpdatePoiActivities, item.id, { price: parseFloat(e.target.value) || 0 })} /></td>
-                                                                                    <td className="px-4 text-center">{!isReadOnly && <button onClick={() => deleteItem(poiActivities, onUpdatePoiActivities, item.id, '活动')}><Trash2 size={14} className="text-gray-300 hover:text-red-500" /></button>}</td>
+                                                                                    <td className="px-4 py-2">
+                                                                                        <input disabled={isReadOnly || isLocked(item)} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.name} onChange={(e) => updateItem<PoiActivity>(poiActivities, onUpdatePoiActivities, item.id, { name: e.target.value })} placeholder="活动名称" />
+                                                                                        {/* @ts-ignore */}
+                                                                                        <span className={`text-[10px] ${item._source === 'public' ? 'text-blue-500' : 'text-gray-400'}`}>{item._source === 'public' ? '公有' : '私有'}</span>
+                                                                                    </td>
+                                                                                    <td className="px-4 py-2"><input disabled={isReadOnly || isLocked(item)} type="number" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.price} onChange={(e) => updateItem<PoiActivity>(poiActivities, onUpdatePoiActivities, item.id, { price: parseFloat(e.target.value) || 0 })} /></td>
+                                                                                    <td className="px-4 text-center">{!isReadOnly && !isLocked(item) && <button onClick={() => deleteItem(poiActivities, onUpdatePoiActivities, item.id, '活动')}><Trash2 size={14} className="text-gray-300 hover:text-red-500" /></button>}</td>
                                                                                 </tr>
                                                                             ))}
                                                                         </tbody>
