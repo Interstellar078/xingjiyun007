@@ -85,12 +85,20 @@ export interface CarCostEntry {
   passengers: number; // "顾客数" (New)
   priceLow: number; // "淡季价格" (New)
   priceHigh: number; // "旺季价格" (New)
+  isPublic?: boolean;
+}
+
+export interface PoiCountry {
+  id: string;
+  name: string;
+  isPublic?: boolean;
 }
 
 export interface PoiCity {
   id: string;
   country: string;
   name: string;
+  isPublic?: boolean;
 }
 
 export interface PoiSpot {
@@ -98,6 +106,7 @@ export interface PoiSpot {
   cityId: string;
   name: string;
   price: number;
+  isPublic?: boolean;
 }
 
 export interface PoiHotel {
@@ -106,6 +115,7 @@ export interface PoiHotel {
   name: string;
   roomType: string;
   price: number;
+  isPublic?: boolean;
 }
 
 export interface PoiActivity {
@@ -113,6 +123,7 @@ export interface PoiActivity {
   cityId: string;
   name: string;
   price: number;
+  isPublic?: boolean;
 }
 
 // New: File Storage for Countries

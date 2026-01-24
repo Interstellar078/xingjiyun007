@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { StorageService } from '../services/storageService';
+import { resourceApi } from '../services/resourceApi';
 import {
     CarCostEntry,
     PoiCity,
@@ -77,47 +78,26 @@ export function useCloudStorage(currentUser: User | null) {
     };
 
     // Load data from cloud
-    const loadCloudData = async () => {
-        if (!currentUser) return;
-        try {
-            await StorageService.ensureAdminProfile();
+    const loadCloudData = async (userOverride?: User) => {
+        const activeUser = userOverride || currentUser;
+        if (!activeUser) return;
 
-            const isAdmin = currentUser.role === 'admin';
+        try {
+            StorageService.ensureAdminProfile(); // No-op but keeps flow
+
+            const isAdmin = activeUser.role === 'admin';
             let cars, cities, spots, hotels, activities, files;
 
-            if (isAdmin) {
-                // Admin: Load standard (which maps to overlay, but for admin with no private data = public)
-                // Actually, ensure we load PUBLIC specifically to be safe?
-                // "Administrator only uses public library info".
-                // Let's use getPublicData to be explicit and avoid any accidental private shadows.
-                [cars, cities, spots, hotels, activities, files] = await Promise.all([
-                    StorageService.getPublicData<CarCostEntry[]>('travel_builder_db_cars'),
-                    StorageService.getPublicData<PoiCity[]>('travel_builder_db_poi_cities'),
-                    StorageService.getPublicData<PoiSpot[]>('travel_builder_db_poi_spots'),
-                    StorageService.getPublicData<PoiHotel[]>('travel_builder_db_poi_hotels_v2'),
-                    StorageService.getPublicData<PoiActivity[]>('travel_builder_db_poi_activities'),
-                    StorageService.getPublicData<CountryFile[]>('travel_builder_db_country_files'),
-                ]);
-            } else {
-                // User: Load Merged
-                // Helper to load by key using generic Getters
-                const loadKey = async <T>(key: string) => {
-                    const [pub, priv] = await Promise.all([
-                        StorageService.getPublicData<T[]>(key),
-                        StorageService.getPrivateData<T[]>(key)
-                    ]);
-                    return mergeData(pub, priv);
-                };
-
-                [cars, cities, spots, hotels, activities, files] = await Promise.all([
-                    loadKey<CarCostEntry>('travel_builder_db_cars'),
-                    loadKey<PoiCity>('travel_builder_db_poi_cities'),
-                    loadKey<PoiSpot>('travel_builder_db_poi_spots'),
-                    loadKey<PoiHotel>('travel_builder_db_poi_hotels_v2'),
-                    loadKey<PoiActivity>('travel_builder_db_poi_activities'),
-                    loadKey<CountryFile>('travel_builder_db_country_files'),
-                ]);
-            }
+            // Use New Resource API for everyone (it handles scope/merging backend side)
+            // Fetch everything with large page size to emulate "loading all data" for Planner Context
+            [cars, cities, spots, hotels, activities] = await Promise.all([
+                resourceApi.listTransports({ size: 2000 }),
+                resourceApi.listCities({ size: 2000 }),
+                resourceApi.listSpots({ size: 2000 }),
+                resourceApi.listHotels({ size: 2000 }),
+                resourceApi.listActivities({ size: 2000 }),
+            ]);
+            files = []; // Files deprecated or moved to new system later
 
             // Non-resource data (Trips, Settings) are always private/scoped natively by overlay
             const [trips, pubTrips, locs, settings] = await Promise.all([
@@ -161,31 +141,10 @@ export function useCloudStorage(currentUser: User | null) {
             setCloudStatus('syncing');
             const handler = setTimeout(() => {
                 if (isResource) {
-                    const isAdmin = currentUser.role === 'admin';
-                    if (isAdmin) {
-                        // Admin saves everything to Public
-                        // NOTE: Admin might have "private" marked items if we transferred them? 
-                        // But here we assume Admin edits = Public update.
-                        // Strip _source tag before saving? 
-                        // Actually, backend JSONB stores what we send. Cleaner to strip `_source`.
-                        const cleanData = data.map((d: any) => {
-                            const { _source, ...rest } = d;
-                            return rest;
-                        });
-                        saver(cleanData, true) // isPublic=true
-                            .then(() => setCloudStatus('synced'))
-                            .catch(() => setCloudStatus('error'));
-                    } else {
-                        // User saves ONLY Private items
-                        // Filter out public sourced items
-                        const privateItems = data.filter((d: any) => d._source !== 'public').map((d: any) => {
-                            const { _source, ...rest } = d;
-                            return rest;
-                        });
-                        saver(privateItems, false) // isPublic=false
-                            .then(() => setCloudStatus('synced'))
-                            .catch(() => setCloudStatus('error'));
-                    }
+                    // Resources are now saved individually via API, NOT synced as blobs.
+                    // This hook should ignored for resources, or we remove usages.
+                    // We kept this logic just in case, but usages below are removed.
+                    return;
                 } else {
                     // Regular non-resource data (Trips, Settings)
                     saver(data, false)
@@ -198,15 +157,11 @@ export function useCloudStorage(currentUser: User | null) {
     };
 
     // Auto-save all data
-    useDebouncedSave(carDB, StorageService.saveCars, 1500, true);
-    useDebouncedSave(poiCities, StorageService.saveCities, 1500, true);
-    useDebouncedSave(poiSpots, StorageService.saveSpots, 1500, true);
-    useDebouncedSave(poiHotels, StorageService.saveHotels, 1500, true);
-    useDebouncedSave(poiActivities, StorageService.saveActivities, 1500, true);
-    useDebouncedSave(countryFiles, StorageService.saveFiles, 1500, true);
+    // Removed Resource Sync calls (Cars, Cities, Spots, Hotels, Activities, Files)
+    // They are now managed via Atomic CRUD in ResourceDatabase.
 
     useDebouncedSave(savedTrips, StorageService.saveTrips, 1500, false);
-    useDebouncedSave(publicTrips, StorageService.savePublicTrips, 1500, false); // Admin only, saves isPublic=true logic handled in Service
+    useDebouncedSave(publicTrips, StorageService.savePublicTrips, 1500, false);
     useDebouncedSave(locationHistory, StorageService.saveLocations, 1500, false);
     useDebouncedSave(colWidths, StorageService.saveAppSettings, 1500, false);
 

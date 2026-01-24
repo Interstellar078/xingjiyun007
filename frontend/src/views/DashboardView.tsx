@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Users, Map, Car, MapPin, Building2, FolderOpen, Loader2, Database } from 'lucide-react';
 import { StorageService, KEYS } from '../services/storageService';
 import { AuthService } from '../services/authService';
-import { generateSeedData, generateSeedTrips } from '../utils/seedData';
 
 /**
  * DashboardView - Admin Statistics Dashboard
@@ -82,36 +81,6 @@ export function DashboardView() {
         fetchStats();
     }, []);
 
-    const handleInitializeData = async () => {
-        if (!confirm('确定要初始化演示数据吗？这将向公有库写入大量数据。')) return;
-
-        setLoading(true);
-        try {
-            const seed = generateSeedData();
-
-            // Save Resources to Public Scope
-            await StorageService.saveCars(seed.cars, true);
-            await StorageService.saveCities(seed.cities, true);
-            await StorageService.saveSpots(seed.spots, true);
-            await StorageService.saveHotels(seed.hotels, true);
-            await StorageService.saveActivities(seed.activities, true);
-
-            // Save Trips to Public Scope
-            const seedTrips = generateSeedTrips(seed);
-
-            const existingTrips = await StorageService.getPublicTrips();
-            const mergedTrips = [...(existingTrips || []), ...seedTrips];
-            await StorageService.savePublicTrips(mergedTrips);
-
-            alert('初始化成功！');
-            window.location.reload();
-        } catch (error) {
-            console.error(error);
-            alert('初始化失败');
-            setLoading(false);
-        }
-    };
-
     if (loading) {
         return (
             <div className="h-full flex items-center justify-center text-gray-400">
@@ -123,22 +92,9 @@ export function DashboardView() {
         );
     }
 
-    const isDataEmpty = stats.resources.cars === 0 && stats.resources.spots === 0;
-
     return (
         <div className="p-8 h-full overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-800">Admin Dashboard</h2>
-                {isDataEmpty && (
-                    <button
-                        onClick={handleInitializeData}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-                    >
-                        <Database size={16} />
-                        初始化演示数据
-                    </button>
-                )}
-            </div>
+            <h2 className="text-2xl font-bold mb-6 text-gray-800">Admin Dashboard</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <StatCard

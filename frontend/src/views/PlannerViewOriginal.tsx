@@ -12,6 +12,9 @@ import {
 import { GlobalSettings } from '../components/GlobalSettings';
 import { Autocomplete } from '../components/Autocomplete';
 import { MultiSelect } from '../components/MultiSelect';
+import { AsyncAutocomplete } from '../components/AsyncAutocomplete';
+import { AsyncMultiSelect } from '../components/AsyncMultiSelect';
+import { resourceApi } from '../services/resourceApi';
 
 import { CloudStorageData, CloudStorageActions } from '../hooks/useCloudStorage';
 import { useTripPlanner } from '../hooks/useTripPlanner';
@@ -197,13 +200,7 @@ export function PlannerViewOriginal({
                         <button onClick={handleOpenSaveModal} className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors">
                             <Save size={16} /> 保存
                         </button>
-                        <div className="h-6 w-px bg-gray-200"></div>
-                        <button onClick={() => fileInputItineraryRef.current?.click()} className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
-                            <FileUp size={16} /> 导入
-                        </button>
-                        <button onClick={handleExportExcel} className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
-                            <FileSpreadsheet size={16} /> 导出
-                        </button>
+
                     </div>
                 </div>
             </div>
@@ -271,11 +268,21 @@ export function PlannerViewOriginal({
                                         <td className="px-2 py-2">
                                             <div className="flex items-center gap-1">
                                                 <div className="flex-1">
-                                                    <Autocomplete
-                                                        suggestions={cloudData.poiHotels.map(h => h.name)}
+                                                    <AsyncAutocomplete
                                                         value={row.hotelName}
                                                         onChange={(v) => { const n = [...rows]; n[index].hotelName = v; setRows(n) }}
-                                                        placeholder="酒店..." className="text-xs"
+                                                        fetchSuggestions={async (q) => {
+                                                            const cities = extractCitiesFromRoute(row.route);
+                                                            const res = await resourceApi.listHotels({
+                                                                city_name: cities.length ? cities : undefined,
+                                                                search: q,
+                                                                size: 20
+                                                            });
+                                                            return res.map(h => h.name);
+                                                        }}
+                                                        dependencies={[row.route]}
+                                                        placeholder="酒店..."
+                                                        className="text-xs"
                                                     />
                                                 </div>
                                                 <button onClick={() => handleQuickSave('hotel', index)} className="text-gray-300 hover:text-blue-600 p-1"><Upload size={14} /></button>
@@ -284,7 +291,22 @@ export function PlannerViewOriginal({
                                         <td className="px-2 py-2">
                                             <div className="flex items-center gap-1">
                                                 <div className="flex-1">
-                                                    <MultiSelect options={cloudData.poiSpots.map(s => s.name)} value={row.ticketName} onChange={(v) => { const n = [...rows]; n[index].ticketName = v; setRows(n) }} placeholder="门票..." className="text-xs" />
+                                                    <AsyncMultiSelect
+                                                        value={row.ticketName}
+                                                        onChange={(v) => { const n = [...rows]; n[index].ticketName = v; setRows(n) }}
+                                                        fetchOptions={async (q) => {
+                                                            const cities = extractCitiesFromRoute(row.route);
+                                                            const res = await resourceApi.listSpots({
+                                                                city_name: cities.length ? cities : undefined,
+                                                                search: q,
+                                                                size: 20
+                                                            });
+                                                            return res.map(s => s.name);
+                                                        }}
+                                                        dependencies={[row.route]}
+                                                        placeholder="门票..."
+                                                        className="text-xs"
+                                                    />
                                                 </div>
                                                 <button onClick={() => handleQuickSave('ticket', index)} className="text-gray-300 hover:text-blue-600 p-1"><Upload size={14} /></button>
                                             </div>
@@ -292,7 +314,22 @@ export function PlannerViewOriginal({
                                         <td className="px-2 py-2">
                                             <div className="flex items-center gap-1">
                                                 <div className="flex-1">
-                                                    <MultiSelect options={cloudData.poiActivities.map(a => a.name)} value={row.activityName} onChange={(v) => { const n = [...rows]; n[index].activityName = v; setRows(n) }} placeholder="活动..." className="text-xs" />
+                                                    <AsyncMultiSelect
+                                                        value={row.activityName}
+                                                        onChange={(v) => { const n = [...rows]; n[index].activityName = v; setRows(n) }}
+                                                        fetchOptions={async (q) => {
+                                                            const cities = extractCitiesFromRoute(row.route);
+                                                            const res = await resourceApi.listActivities({
+                                                                city_name: cities.length ? cities : undefined,
+                                                                search: q,
+                                                                size: 20
+                                                            });
+                                                            return res.map(a => a.name);
+                                                        }}
+                                                        dependencies={[row.route]}
+                                                        placeholder="活动..."
+                                                        className="text-xs"
+                                                    />
                                                 </div>
                                                 <button onClick={() => handleQuickSave('activity', index)} className="text-gray-300 hover:text-blue-600 p-1"><Upload size={14} /></button>
                                             </div>

@@ -71,7 +71,7 @@ export default function App() {
                         navigate('/planner', { replace: true });
                     }
                 }
-                await cloudStorage.loadCloudData();
+                await cloudStorage.loadCloudData(user);
             } else {
                 // Not logged in? Landing page handles it, 
                 // but if we are at deeply nested path? 
@@ -98,7 +98,7 @@ export default function App() {
         }
 
         cloudStorage.setIsAppLoading(true);
-        await cloudStorage.loadCloudData();
+        await cloudStorage.loadCloudData(user);
         cloudStorage.setIsAppLoading(false);
     };
 

@@ -40,8 +40,8 @@ export const StorageService = {
   async getHotels(): Promise<PoiHotel[]> { return getData(KEYS.DB_HOTELS, []); },
   async getActivities(): Promise<PoiActivity[]> { return getData(KEYS.DB_ACTIVITIES, []); },
   async getFiles(): Promise<CountryFile[]> { return getData(KEYS.DB_FILES, []); },
-  async getTrips(): Promise<SavedTrip[]> { return getData(KEYS.HISTORY, []); },
-  async getPublicTrips(): Promise<SavedTrip[]> { return getData(KEYS.PUBLIC_TRIPS, []); },
+  async getTrips(): Promise<SavedTrip[]> { return apiGet('/api/trips?scope=private'); },
+  async getPublicTrips(): Promise<SavedTrip[]> { return apiGet('/api/trips?scope=public'); },
   async getLocations(): Promise<string[]> { return getData(KEYS.LOCATIONS, []); },
 
   // --- Admin ---
@@ -61,8 +61,8 @@ export const StorageService = {
   async saveActivities(data: PoiActivity[], isPublic = false): Promise<void> { return setData(KEYS.DB_ACTIVITIES, data, isPublic); },
   async saveFiles(data: CountryFile[], isPublic = false): Promise<void> { return setData(KEYS.DB_FILES, data, isPublic); },
 
-  async saveTrips(data: SavedTrip[]): Promise<void> { return setData(KEYS.HISTORY, data); },
-  async savePublicTrips(data: SavedTrip[]): Promise<void> { return setData(KEYS.PUBLIC_TRIPS, data, true); }, // Always public
+  async saveTrips(data: SavedTrip[]): Promise<void> { return apiPut('/api/trips/batch?scope=private', data); },
+  async savePublicTrips(data: SavedTrip[]): Promise<void> { return apiPut('/api/trips/batch?scope=public', data); }, // Always public
   async saveLocations(data: string[]): Promise<void> { return setData(KEYS.LOCATIONS, data); },
 
   async getAppSettings(): Promise<any> {

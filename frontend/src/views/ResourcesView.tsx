@@ -1,43 +1,28 @@
 import React from 'react';
 import { User } from '../types';
 import { ResourceDatabase } from '../components/ResourceDatabase';
-import { CloudStorageData, CloudStorageActions } from '../hooks/useCloudStorage';
 
 interface ResourcesViewProps {
     currentUser: User;
-    cloudStorage: {
-        data: CloudStorageData;
-        actions: CloudStorageActions;
-    };
+    // cloudStorage not needed anymore for this view, but might be passed from App.tsx
+    // We keep the prop definition compatible with App.tsx but ignore it.
+    cloudStorage: any;
 }
 
 /**
- * ResourcesView - Manage POI resources
+ * ResourcesView - Manage POI resources with Pagination
  */
-export function ResourcesView({ currentUser, cloudStorage }: ResourcesViewProps) {
-    const { data, actions } = cloudStorage;
-
+export function ResourcesView({ currentUser }: ResourcesViewProps) {
     return (
         <div className="h-full w-full">
             <ResourceDatabase
                 isOpen={true}
                 variant="page"
                 onClose={() => { }}
-                carDB={data.carDB}
-                onUpdateCarDB={actions.setCarDB}
-                poiCities={data.poiCities}
-                onUpdatePoiCities={actions.setPoiCities}
-                poiSpots={data.poiSpots}
-                onUpdatePoiSpots={actions.setPoiSpots}
-                poiHotels={data.poiHotels}
-                onUpdatePoiHotels={actions.setPoiHotels}
-                poiActivities={data.poiActivities}
-                onUpdatePoiActivities={actions.setPoiActivities}
-                countryFiles={data.countryFiles}
-                onUpdateCountryFiles={actions.setCountryFiles}
                 isAdmin={currentUser.role === 'admin'}
                 isReadOnly={false}
             />
         </div>
     );
 }
+
