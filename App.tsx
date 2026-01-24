@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Trash2, Download, Save, FolderOpen, Rocket, Sparkles, Database, Filter, Calendar, MapPin, Clock, Copy, Edit3, X, FileDown, FileUp, HardDrive, PlusCircle, CheckCircle, RotateCcw, ArrowRightCircle, Search, LogOut, ShieldAlert, FileSpreadsheet, Calculator, Info, Library, Wand2, Loader2, Upload, Cloud, RefreshCw, Settings, AlertTriangle, User as UserIcon } from 'lucide-react';
 import JSZip from 'jszip';
@@ -11,7 +12,6 @@ import { AuthModal } from './components/AuthModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { addDays, generateUUID } from './utils/dateUtils';
 import { suggestHotels, generateFileName, generateComprehensiveItinerary, ItineraryItem, AIPlanningResult } from './services/geminiService';
-import { generateSeedData } from './utils/seedData';
 import { AuthService } from './services/authService';
 import { StorageService } from './services/storageService';
 import { SupabaseManager } from './services/supabaseClient';
@@ -26,8 +26,16 @@ export default function App() {
 
   // --- App State ---
   const [isAppLoading, setIsAppLoading] = useState(true);
+  const [dataLoadedSuccessfully, setDataLoadedSuccessfully] = useState(false); // Safety flag
   const [cloudStatus, setCloudStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const [notification, setNotification] = useState<{show: boolean, message: string}>({ show: false, message: '' });
+
+  // System Config
+  const [systemConfig, setSystemConfig] = useState<{ defaultMargin: number }>({ defaultMargin: 20 });
+
+  // Loading states for specific buttons
+  const [isRefreshingResources, setIsRefreshingResources] = useState(false);
+  const [isRefreshingTrips, setIsRefreshingTrips] = useState(false);
 
   // 1. Settings & UI State
   const [settings, setSettings] = useState<TripSettings>({
@@ -39,7 +47,7 @@ export default function App() {
     exchangeRate: 1,
     destinations: [],
     startDate: new Date().toISOString().split('T')[0], 
-    marginPercent: 15,
+    marginPercent: 20, // Default fallback
     tipPerDay: 50,
     manualInclusions: '1. 全程舒适专车接送\n2. 行程所列首道景点门票\n3. 全程高品质酒店住宿\n4. 7x24小时管家服务',
     manualExclusions: ''
@@ -79,6 +87,7 @@ export default function App() {
       activityCost: 0,
       otherCost: 0,
       customCosts: {},
+      manualCostFlags: {}, // Initialize empty
   })));
   
   const [customColumns, setCustomColumns] = useState<CustomColumn[]>([]);
@@ -117,6 +126,16 @@ export default function App() {
 
   const totalCost = useMemo(() => rows.reduce((acc, r) => acc + r.transportCost + r.hotelCost + r.ticketCost + r.activityCost + r.otherCost, 0), [rows]);
 
+  const isAdmin = currentUser?.role === 'admin';
+
+  // --- Masking Helper ---
+  const maskNumber = (num: number): string => {
+      if (isAdmin) return num.toString();
+      const s = Math.round(num).toString();
+      if (s.length <= 1) return s;
+      return s[0] + '*'.repeat(s.length - 1);
+  };
+
   // Pre-calculate valid cities based on selected countries
   // Rule: If destinations are selected, only show cities from those countries.
   const allowedCityNames = useMemo(() => {
@@ -132,16 +151,43 @@ export default function App() {
           setIsAppLoading(true);
           const user = await AuthService.getCurrentUser();
           if (user) setCurrentUser(user);
-          await loadCloudData();
+          await loadCloudData(user);
           setIsAppLoading(false);
       };
       initApp();
   }, []);
 
-  const loadCloudData = async () => {
+  // Update margin when user changes or system config loads
+  useEffect(() => {
+      if (!isAdmin && systemConfig) {
+          setSettings(prev => ({ ...prev, marginPercent: systemConfig.defaultMargin }));
+      }
+  }, [currentUser, systemConfig, isAdmin]);
+
+  // Sync dates when Start Date changes to ensure logical correctness (sequential dates)
+  useEffect(() => {
+      if (settings.startDate) {
+          setRows(prevRows => prevRows.map((row, index) => {
+              const targetDate = addDays(settings.startDate, index);
+              // Only update if different to avoid unnecessary renders
+              if (row.date !== targetDate) {
+                  return { ...row, date: targetDate };
+              }
+              return row;
+          }));
+      }
+  }, [settings.startDate]);
+
+  const loadCloudData = async (user: User | null = currentUser) => {
       try {
+            // 1. Try migration first (Syncs local storage to cloud if cloud is empty)
+            await StorageService.migrateLocalData();
+            
+            // 2. Ensure Admin
             await StorageService.ensureAdminProfile();
-            const [cars, cities, spots, hotels, activities, files, trips, locs, settings] = await Promise.all([
+
+            // 3. Fetch Data
+            const [cars, cities, spots, hotels, activities, files, trips, locs, settings, config] = await Promise.all([
                 StorageService.getCars(),
                 StorageService.getCities(),
                 StorageService.getSpots(),
@@ -150,8 +196,10 @@ export default function App() {
                 StorageService.getFiles(),
                 StorageService.getTrips(),
                 StorageService.getLocations(),
-                StorageService.getAppSettings()
+                StorageService.getAppSettings(),
+                StorageService.getSystemConfig()
             ]);
+
             setCarDB(cars);
             setPoiCities(cities);
             setPoiSpots(spots);
@@ -161,10 +209,20 @@ export default function App() {
             setSavedTrips(trips);
             setLocationHistory(locs);
             if (settings && Object.keys(settings).length > 0) setColWidths(settings);
+            setSystemConfig(config);
+            
+            // Apply default margin if not admin
+            if (user?.role !== 'admin') {
+                setSettings(prev => ({...prev, marginPercent: config.defaultMargin }));
+            }
+
+            setDataLoadedSuccessfully(true); // Safety flag enabled
             setCloudStatus('synced');
       } catch (e) {
           console.error("Load failed", e);
           setCloudStatus('error');
+          setDataLoadedSuccessfully(false); // Safety flag disabled
+          alert("连接云端数据库失败。为保护数据安全，自动保存已禁用。请检查网络后刷新页面。");
       }
   };
 
@@ -172,7 +230,11 @@ export default function App() {
       const firstRun = useRef(true);
       useEffect(() => {
           if (firstRun.current) { firstRun.current = false; return; }
-          if (isAppLoading) return;
+          
+          // SAFETY CHECK: Do not save if initial load failed.
+          // This prevents overwriting existing cloud data with empty arrays if load fails.
+          if (isAppLoading || !dataLoadedSuccessfully) return;
+
           setCloudStatus('syncing');
           const handler = setTimeout(() => {
               saver(data).then(() => setCloudStatus('synced')).catch(() => setCloudStatus('error'));
@@ -190,6 +252,90 @@ export default function App() {
   useDebouncedSave(savedTrips, StorageService.saveTrips);
   useDebouncedSave(locationHistory, StorageService.saveLocations);
   useDebouncedSave(colWidths, StorageService.saveAppSettings);
+
+  // Helper to record resource updates
+  const handleResourceActivity = async (username: string) => {
+      // Record metadata: timestamp + user
+      await StorageService.saveResourceMetadata({
+          lastUpdated: Date.now(),
+          updatedBy: username
+      });
+  };
+
+  const handleForceSave = async () => {
+      if (isAppLoading || !dataLoadedSuccessfully) {
+          alert("数据未完全加载，无法执行强制同步，以防数据丢失。");
+          return;
+      }
+      setCloudStatus('syncing');
+      try {
+          await Promise.all([
+              StorageService.saveCars(carDB),
+              StorageService.saveCities(poiCities),
+              StorageService.saveSpots(poiSpots),
+              StorageService.saveHotels(poiHotels),
+              StorageService.saveActivities(poiActivities),
+              StorageService.saveFiles(countryFiles)
+          ]);
+          setCloudStatus('synced');
+          setNotification({ show: true, message: '已立即同步至云端' });
+          setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+      } catch (e) {
+          console.error("Force save failed", e);
+          setCloudStatus('error');
+      }
+  };
+
+  const handleOpenResources = async () => {
+      if (isRefreshingResources) return;
+      setIsRefreshingResources(true);
+      setCloudStatus('syncing');
+      try {
+          // Force fetch latest resources from cloud
+          const [cars, cities, spots, hotels, activities, files] = await Promise.all([
+              StorageService.getCars(),
+              StorageService.getCities(),
+              StorageService.getSpots(),
+              StorageService.getHotels(),
+              StorageService.getActivities(),
+              StorageService.getFiles()
+          ]);
+          setCarDB(cars);
+          setPoiCities(cities);
+          setPoiSpots(spots);
+          setPoiHotels(hotels);
+          setPoiActivities(activities);
+          setCountryFiles(files);
+          setCloudStatus('synced');
+          setIsResourceOpen(true);
+      } catch (error) {
+          console.error("Failed to refresh resources", error);
+          setCloudStatus('error');
+          // Still open to avoid lockout, data might be stale
+          setIsResourceOpen(true);
+      } finally {
+          setIsRefreshingResources(false);
+      }
+  };
+
+  const handleOpenSavedList = async () => {
+      if (isRefreshingTrips) return;
+      setIsRefreshingTrips(true);
+      setCloudStatus('syncing');
+      try {
+          // Force fetch latest trips from cloud
+          const trips = await StorageService.getTrips();
+          setSavedTrips(trips);
+          setCloudStatus('synced');
+          setShowSavedList(true);
+      } catch (error) {
+          console.error("Failed to refresh trips", error);
+          setCloudStatus('error');
+          setShowSavedList(true);
+      } finally {
+          setIsRefreshingTrips(false);
+      }
+  };
 
   function createEmptyRow(dayIndex: number): DayRow {
     return {
@@ -212,6 +358,7 @@ export default function App() {
       activityCost: 0,
       otherCost: 0,
       customCosts: {},
+      manualCostFlags: {}, // Default empty
     };
   }
 
@@ -279,75 +426,115 @@ export default function App() {
           relevantCityIds = Array.from(new Set(relevantCityIds));
 
           // 1. Hotel Logic
-          // Rule: Hotel must be in Destination City (last in route)
-          if (r.hotelName) {
-              let hotels = [];
-              if (destinationCityIds.length > 0) {
-                  hotels = poiHotels.filter(h => h.name === r.hotelName && destinationCityIds.includes(h.cityId));
-              } else {
-                  // If no specific destination city (or route empty), check allowed countries
-                  hotels = poiHotels.filter(h => h.name === r.hotelName && relevantCityIds.includes(h.cityId));
-              }
-
-              // Fallback to name match if specific location match failed (e.g. city name typo)
-              if (hotels.length === 0) {
-                  hotels = poiHotels.filter(h => h.name === r.hotelName);
-              }
-              
-              if (hotels.length > 0) {
-                  let matched = hotels.find(h => h.roomType === r.hotelRoomType);
-                  if (!matched) matched = hotels[0]; 
-                  
-                  if (matched) {
-                      if (!r.hotelRoomType || matched.roomType !== r.hotelRoomType) {
-                           r.hotelRoomType = matched.roomType;
-                      }
-                      r.hotelPrice = matched.price;
-                      r.hotelCost = matched.price * (r.rooms || 0); 
+          // ONLY refresh from DB if manual flag is NOT set
+          if (!r.manualCostFlags?.hotel) {
+              if (r.hotelName) {
+                  let hotels = [];
+                  if (destinationCityIds.length > 0) {
+                      hotels = poiHotels.filter(h => h.name === r.hotelName && destinationCityIds.includes(h.cityId));
+                  } else {
+                      // If no specific destination city (or route empty), check allowed countries
+                      hotels = poiHotels.filter(h => h.name === r.hotelName && relevantCityIds.includes(h.cityId));
                   }
+
+                  // Fallback to name match if specific location match failed (e.g. city name typo)
+                  if (hotels.length === 0) {
+                      hotels = poiHotels.filter(h => h.name === r.hotelName);
+                  }
+                  
+                  if (hotels.length > 0) {
+                      let matched = hotels.find(h => h.roomType === r.hotelRoomType);
+                      if (!matched) matched = hotels[0]; 
+                      
+                      if (matched) {
+                          if (!r.hotelRoomType || matched.roomType !== r.hotelRoomType) {
+                              r.hotelRoomType = matched.roomType;
+                          }
+                          r.hotelPrice = matched.price;
+                          r.hotelCost = matched.price * (r.rooms || 0); 
+                      }
+                  }
+              } else {
+                  r.hotelCost = 0;
+                  r.hotelPrice = 0;
               }
-          } else {
-              r.hotelCost = 0;
-              r.hotelPrice = 0;
           }
 
           // 2. Ticket Logic
-          // Rule: Spots must be in ANY city in route
-          if (r.ticketName.length > 0) {
-              let sum = 0;
-              r.ticketName.forEach(name => {
-                  let s = poiSpots.find(item => item.name === name && relevantCityIds.includes(item.cityId));
-                  if (!s) s = poiSpots.find(item => item.name === name); // Fallback
-                  if (s) sum += s.price;
-              });
-              r.ticketCost = sum * (settings.peopleCount || 0);
-          } else {
-              r.ticketCost = 0;
+          // ONLY refresh from DB if manual flag is NOT set
+          if (!r.manualCostFlags?.ticket) {
+              if (r.ticketName.length > 0) {
+                  let sum = 0;
+                  r.ticketName.forEach(name => {
+                      let s = poiSpots.find(item => item.name === name && relevantCityIds.includes(item.cityId));
+                      if (!s) s = poiSpots.find(item => item.name === name); // Fallback
+                      if (s) sum += s.price;
+                  });
+                  r.ticketCost = sum * (settings.peopleCount || 0);
+              } else {
+                  r.ticketCost = 0;
+              }
           }
 
           // 3. Activity Logic
-          // Rule: Activities must be in ANY city in route
-          if (r.activityName.length > 0) {
-              let sum = 0;
-              r.activityName.forEach(actName => {
-                  let act = poiActivities.find(a => a.name === actName && relevantCityIds.includes(a.cityId));
-                  if (!act) act = poiActivities.find(a => a.name === actName); // Fallback
-                  if (act) sum += act.price;
-              });
-              r.activityCost = sum * (settings.peopleCount || 0);
-          } else {
-              r.activityCost = 0;
+          // ONLY refresh from DB if manual flag is NOT set
+          if (!r.manualCostFlags?.activity) {
+              if (r.activityName.length > 0) {
+                  let sum = 0;
+                  r.activityName.forEach(actName => {
+                      let act = poiActivities.find(a => a.name === actName && relevantCityIds.includes(a.cityId));
+                      if (!act) act = poiActivities.find(a => a.name === actName); // Fallback
+                      if (act) sum += act.price;
+                  });
+                  r.activityCost = sum * (settings.peopleCount || 0);
+              } else {
+                  r.activityCost = 0;
+              }
           }
 
           // 4. Transport Logic
-          if (r.carModel) {
-               const car = carDB.find(c => c.carModel === r.carModel && (settings.destinations.includes(c.region) || c.region === '通用' || c.region === 'General'));
-               if (car) r.transportCost = car.priceLow; 
+          // ONLY refresh from DB if manual flag is NOT set
+          if (!r.manualCostFlags?.transport) {
+              if (r.carModel) {
+                  // Determine target service type based on selected transport tags
+                  let targetService = '包车';
+                  // If PickupDropoff is selected and PrivateCar is NOT, prefer PickupDropoff service entries
+                  if (r.transport.includes('接送机') && !r.transport.includes('包车')) {
+                      targetService = '接送机';
+                  }
+                  // Note: '包车' is default if both are selected or only '包车' is selected
+
+                  // Try to find exact match first
+                  let car = carDB.find(c => 
+                      c.carModel === r.carModel && 
+                      (c.serviceType === targetService || c.serviceType === (targetService === '接送机' ? '接机' : '')) && // Fuzzy match for legacy service types if needed
+                      (settings.destinations.includes(c.region) || c.region === '通用' || c.region === 'General')
+                  );
+                  
+                  // Fallback to strict service type match if fuzzy failed
+                  if (!car) {
+                      car = carDB.find(c => 
+                          c.carModel === r.carModel && 
+                          (c.serviceType === targetService && 
+                          (settings.destinations.includes(c.region) || c.region === '通用' || c.region === 'General')
+                      );
+                  }
+
+                  // Fallback: relax service type check if exact match not found (legacy/simple behavior)
+                  if (!car) {
+                      car = carDB.find(c => 
+                          c.carModel === r.carModel && 
+                          (settings.destinations.includes(c.region) || c.region === '通用' || c.region === 'General')
+                      );
+                  }
+
+                  if (car) r.transportCost = car.priceLow; 
+              }
           }
           return r;
       });
       setRows(newRows);
-      setNotification({ show: true, message: '所有费用已根据当前人数、房间数和资源库价格刷新' });
+      setNotification({ show: true, message: '所有费用已刷新 (手动输入的金额已保留)' });
       setTimeout(() => setNotification({ show: false, message: '' }), 3000);
   };
 
@@ -432,6 +619,37 @@ export default function App() {
       return getMatchingCityIds(lastCityName, poiCities);
   };
 
+  const handleCarModelChange = (index: number, model: string) => {
+      const row = rows[index];
+      
+      // Look up price
+      let targetService = '包车';
+      if (row.transport.includes('接送机') && !row.transport.includes('包车')) {
+          targetService = '接送机';
+      }
+
+      let car = carDB.find(c => 
+          c.carModel === model && 
+          (c.serviceType === targetService || c.serviceType === (targetService === '接送机' ? '接机' : '')) && 
+          (settings.destinations.includes(c.region) || c.region === '通用' || c.region === 'General')
+      );
+      
+      if (!car) {
+          car = carDB.find(c => 
+              c.carModel === model && 
+              (settings.destinations.includes(c.region) || c.region === '通用' || c.region === 'General')
+          );
+      }
+
+      const cost = car ? car.priceLow : 0;
+
+      updateRow(index, { 
+          carModel: model,
+          transportCost: cost,
+          manualCostFlags: { ...row.manualCostFlags, transport: false } // Reset Manual Flag
+      });
+  };
+
   const handleHotelChange = (index: number, newName: string) => {
       const row = rows[index];
       const cityIds = getDestinationCityIds(row.route);
@@ -444,7 +662,10 @@ export default function App() {
           variants = poiHotels.filter(h => h.name === newName);
       }
       
-      let updates: Partial<DayRow> = { hotelName: newName };
+      let updates: Partial<DayRow> = { 
+          hotelName: newName,
+          manualCostFlags: { ...row.manualCostFlags, hotel: false } // RESET FLAG: New selection implies DB pricing
+      };
       
       if (variants.length > 0) {
           const defaultRoom = variants[0];
@@ -476,18 +697,80 @@ export default function App() {
           updateRow(index, {
               hotelRoomType: newType,
               hotelPrice: variant.price,
-              hotelCost: variant.price * (row.rooms || 1)
+              hotelCost: variant.price * (row.rooms || 1),
+              manualCostFlags: { ...row.manualCostFlags, hotel: false } // RESET FLAG
           });
       } else {
-          updateRow(index, { hotelRoomType: newType });
+          updateRow(index, { 
+              hotelRoomType: newType,
+              manualCostFlags: { ...row.manualCostFlags, hotel: false } // RESET FLAG
+          });
       }
+  };
+
+  const handleTicketChange = (index: number, val: string[]) => {
+      const row = rows[index];
+      // Calculate Cost immediately
+      const routeCities = extractCitiesFromRoute(row.route);
+      let relevantCityIds: string[] = [];
+      if (routeCities.length > 0) {
+          relevantCityIds = routeCities.flatMap(name => getMatchingCityIds(name, poiCities));
+      } else {
+          relevantCityIds = poiCities.filter(c => settings.destinations.includes(c.country)).map(c => c.id);
+      }
+      relevantCityIds = Array.from(new Set(relevantCityIds));
+
+      let sum = 0;
+      val.forEach(name => {
+          // Find spot price in context first, then general
+          let s = poiSpots.find(item => item.name === name && relevantCityIds.includes(item.cityId));
+          if (!s) s = poiSpots.find(item => item.name === name);
+          if (s) sum += s.price;
+      });
+      const cost = sum * (settings.peopleCount || 0);
+
+      updateRow(index, { 
+          ticketName: val, 
+          ticketCost: cost,
+          manualCostFlags: { ...row.manualCostFlags, ticket: false } // Reset Manual Flag
+      });
+  };
+
+  const handleActivityChange = (index: number, val: string[]) => {
+      const row = rows[index];
+      // Calculate Cost immediately
+      const routeCities = extractCitiesFromRoute(row.route);
+      let relevantCityIds: string[] = [];
+      if (routeCities.length > 0) {
+          relevantCityIds = routeCities.flatMap(name => getMatchingCityIds(name, poiCities));
+      } else {
+          relevantCityIds = poiCities.filter(c => settings.destinations.includes(c.country)).map(c => c.id);
+      }
+      relevantCityIds = Array.from(new Set(relevantCityIds));
+
+      let sum = 0;
+      val.forEach(name => {
+          let act = poiActivities.find(a => a.name === name && relevantCityIds.includes(a.cityId));
+          if (!act) act = poiActivities.find(a => a.name === name);
+          if (act) sum += act.price;
+      });
+      const cost = sum * (settings.peopleCount || 0);
+
+      updateRow(index, { 
+          activityName: val, 
+          activityCost: cost,
+          manualCostFlags: { ...row.manualCostFlags, activity: false } // Reset Manual Flag
+      });
   };
 
   const handleRoomsChange = (index: number, newRooms: number) => {
       const row = rows[index];
+      // Only auto-update cost if NOT manual. If manual, user set a fixed total.
+      const newCost = row.manualCostFlags?.hotel ? row.hotelCost : (row.hotelPrice * newRooms);
+      
       updateRow(index, {
           rooms: newRooms,
-          hotelCost: row.hotelPrice * newRooms
+          hotelCost: newCost
       });
   };
 
@@ -540,18 +823,13 @@ export default function App() {
       let tempCities = [...poiCities];
       let hasCityUpdate = false;
 
-      // Helper to find existing or upgradeable city
-      // Logic:
-      // 1. Exact match found -> Return ID.
-      // 2. New Name contains brackets (Combined) and Existing Name is a subset (Chinese or English) -> Update Existing Name, Return ID.
-      // 3. New Name is subset, Existing Name is Combined -> Return ID (implicitly merged).
+      // Helper to find or create existing city with upgrade logic
       const ensureCitySmart = (name: string): string => {
           // 1. Exact match
           const exact = tempCities.find(c => c.country === finalCountry && c.name === name);
           if (exact) return exact.id;
 
           // 2. Check if we are adding a Composite that matches an existing Simple (Upgrade Scenario)
-          // e.g. Input: "Beijing (China)", Existing: "Beijing" -> Update Existing to "Beijing (China)"
           if (name.includes('(') && name.includes(')')) {
               const match = name.match(/^(.+?)\s*\((.+?)\)$/);
               if (match) {
@@ -568,7 +846,6 @@ export default function App() {
           }
 
           // 3. Check if we are adding a Simple that matches an existing Composite (Alias Scenario)
-          // e.g. Input: "Beijing", Existing: "Beijing (China)" -> Use Existing ID
           const composite = tempCities.find(c => {
               if (!c.name.includes('(') || !c.name.includes(')')) return false;
               if (c.country !== finalCountry) return false;
@@ -588,9 +865,7 @@ export default function App() {
       if (type === 'route') {
         const currentNames = new Set(poiCities.map(c => c.name));
         routeCities.forEach(name => {
-             // Use Smart Logic
              const id = ensureCitySmart(name);
-             // Check if it was effectively a new addition for counting purposes
              if (!currentNames.has(name) && !poiCities.find(c => c.id === id)) {
                  addedCount++;
              } else if (hasCityUpdate) {
@@ -603,12 +878,10 @@ export default function App() {
             setPoiCities(tempCities);
         }
       } else {
-        // Find or Create City using Smart Logic
         const cityId = ensureCitySmart(targetCityName);
         if (hasCityUpdate) setPoiCities(tempCities);
 
         if (type === 'hotel') { 
-            // Check duplication: Same City + Same Hotel Name
             const exists = poiHotels.some(h => h.cityId === cityId && h.name === row.hotelName);
             if (!exists) {
                 setPoiHotels(prev => [...prev, { id: generateUUID(), cityId: cityId!, name: row.hotelName, roomType: '标准间', price: row.hotelPrice || 0 }]); 
@@ -652,6 +925,10 @@ export default function App() {
       if (hasCityUpdate) msg += ` (已自动合并/更新城市名称)`;
       if (duplicateCount > 0) msg += `有 ${duplicateCount} 个资源已存在，已跳过。`;
       alert(msg || "没有新资源被添加。");
+      
+      if (addedCount > 0 || hasCityUpdate) {
+          handleResourceActivity(currentUser?.username || 'user');
+      }
       
       setQsModal(null);
   };
@@ -708,6 +985,10 @@ export default function App() {
 
   const handleLoadTrip = (trip: SavedTrip) => {
     setSettings(trip.settings);
+    // If not admin, enforce default margin even when loading a trip to respect current commercial rules
+    if (!isAdmin) {
+        setSettings(prev => ({ ...prev, marginPercent: systemConfig.defaultMargin }));
+    }
     setRows(trip.rows);
     setCustomColumns(trip.customColumns || []);
     setActiveTripId(trip.id);
@@ -719,7 +1000,12 @@ export default function App() {
   const handleNewTrip = () => {
     if (window.confirm("确定要新建行程吗？当前未保存的内容将丢失。")) {
         setActiveTripId(null);
-        setSettings({ ...settings, destinations: [], startDate: new Date().toISOString().split('T')[0] });
+        setSettings({ 
+            ...settings, 
+            destinations: [], 
+            startDate: new Date().toISOString().split('T')[0],
+            marginPercent: isAdmin ? settings.marginPercent : systemConfig.defaultMargin // Reset margin for non-admins
+        });
         setRows(Array.from({ length: 8 }).map((_, i) => createEmptyRow(i + 1)));
         setCustomColumns([]);
     }
@@ -772,6 +1058,10 @@ export default function App() {
           savedTrips, 
           availableCountries, 
           availableCities, // Pass cities
+          poiCities, // New: Pass full city objects
+          poiSpots, // New: Pass full spots
+          poiHotels, // New: Pass full hotels
+          poiActivities, // New: Pass full activities
           aiPromptInput
       );
       
@@ -784,26 +1074,135 @@ export default function App() {
               }));
           }
           
-          // --- FULL ROW REPLACEMENT & RESIZING ---
-          // Use AI result to fully replace rows, ensuring deleted days are removed
+          // --- FULL ROW REPLACEMENT & RESIZING WITH INTELLIGENT RESOURCE MATCHING ---
           const generatedLength = result.itinerary.length;
           const newRows = Array.from({ length: generatedLength }).map((_, i) => {
-              const existingRow = rows[i] || createEmptyRow(i + 1);
+              // 1. Create Base Row
               const item = result.itinerary[i];
-              return {
+              const existingRow = createEmptyRow(i + 1); // Start fresh to avoid pollution
+              
+              const row: DayRow = {
                   ...existingRow,
                   dayIndex: i + 1,
                   date: settings.startDate ? addDays(settings.startDate, i) : '',
                   route: `${item.origin}-${item.destination}`,
-                  hotelName: item.hotelName || '',
-                  ticketName: item.ticketName ? [item.ticketName] : [],
-                  activityName: item.activityName ? [item.activityName] : [],
                   description: item.description || ''
               };
+
+              // 2. Identify Context (Country & City)
+              // We need to find the City ID for the 'Destination' to pick hotels/spots there.
+              const destCityName = item.destination;
+              // Use fuzzy match logic similar to getMatchingCityIds but return the object
+              const targetCity = poiCities.find(c => {
+                  if (c.name === destCityName) return true;
+                  // Handle "Beijing (China)" vs "Beijing"
+                  if (c.name.includes('(') && c.name.includes(')')) {
+                       const parts = c.name.match(/^(.+?)\s*\((.+?)\)$/);
+                       if (parts && (parts[1].trim() === destCityName || parts[2].trim() === destCityName)) return true;
+                  }
+                  if (destCityName.includes('(') && destCityName.includes(')')) {
+                      const parts = destCityName.match(/^(.+?)\s*\((.+?)\)$/);
+                      if (parts && (c.name === parts[1].trim() || c.name === parts[2].trim())) return true;
+                  }
+                  return false;
+              });
+
+              const cityId = targetCity?.id;
+              // Determine Country: Try target city, then AI's destCountry, then global settings
+              const country = targetCity?.country || item.destinationCountry || (settings.destinations.length > 0 ? settings.destinations[0] : '');
+
+              // 3. Intelligent Car Selection
+              // Logic: Match Country -> Capacity >= People -> Cheapest Price
+              if (country) {
+                  const suitableCars = carDB
+                    .filter(c => 
+                        (c.region === country || c.region === '通用' || c.region === 'General') && 
+                        c.passengers >= settings.peopleCount
+                    )
+                    .sort((a, b) => a.priceLow - b.priceLow); // Ascending Price
+
+                  if (suitableCars.length > 0) {
+                      row.carModel = suitableCars[0].carModel;
+                      row.transportCost = suitableCars[0].priceLow;
+                  }
+              }
+
+              // 4. Intelligent Hotel Selection
+              // Logic: Match City -> Cheapest Price
+              if (cityId) {
+                  const cityHotels = poiHotels
+                    .filter(h => h.cityId === cityId)
+                    .sort((a, b) => a.price - b.price); // Ascending Price
+                  
+                  if (cityHotels.length > 0) {
+                      const cheapestHotel = cityHotels[0];
+                      row.hotelName = cheapestHotel.name;
+                      row.hotelRoomType = cheapestHotel.roomType;
+                      row.hotelPrice = cheapestHotel.price;
+                      row.hotelCost = cheapestHotel.price * row.rooms;
+                  } else {
+                      // Fallback to AI text if no DB entry
+                      row.hotelName = item.hotelName || '';
+                  }
+              } else {
+                  row.hotelName = item.hotelName || '';
+              }
+
+              // 5. Intelligent Spot/Ticket Selection
+              // Logic: Fuzzy match AI text to DB Spots. If match, use DB name/price.
+              const aiTickets = item.ticketName ? item.ticketName.split(/[,，、]/).map(s => s.trim()).filter(Boolean) : [];
+              const matchedTicketNames: string[] = [];
+              let totalTicketCost = 0;
+
+              if (cityId) {
+                  const citySpots = poiSpots.filter(s => s.cityId === cityId);
+                  aiTickets.forEach(aiT => {
+                      // Try strict match first, then partial
+                      let match = citySpots.find(s => s.name === aiT);
+                      if (!match) match = citySpots.find(s => s.name.includes(aiT) || aiT.includes(s.name));
+                      
+                      if (match) {
+                          matchedTicketNames.push(match.name);
+                          totalTicketCost += match.price;
+                      } else {
+                          matchedTicketNames.push(aiT); // Keep AI name if no match
+                      }
+                  });
+              } else {
+                  matchedTicketNames.push(...aiTickets);
+              }
+              row.ticketName = matchedTicketNames;
+              row.ticketCost = totalTicketCost * settings.peopleCount;
+
+              // 6. Intelligent Activity Selection
+              const aiActivities = item.activityName ? item.activityName.split(/[,，、]/).map(s => s.trim()).filter(Boolean) : [];
+              const matchedActivityNames: string[] = [];
+              let totalActivityCost = 0;
+
+              if (cityId) {
+                  const cityActivities = poiActivities.filter(a => a.cityId === cityId);
+                  aiActivities.forEach(aiA => {
+                      let match = cityActivities.find(a => a.name === aiA);
+                      if (!match) match = cityActivities.find(a => a.name.includes(aiA) || aiA.includes(a.name));
+                      
+                      if (match) {
+                          matchedActivityNames.push(match.name);
+                          totalActivityCost += match.price;
+                      } else {
+                          matchedActivityNames.push(aiA);
+                      }
+                  });
+              } else {
+                  matchedActivityNames.push(...aiActivities);
+              }
+              row.activityName = matchedActivityNames;
+              row.activityCost = totalActivityCost * settings.peopleCount;
+
+              return row;
           });
           
           setRows(newRows);
-          setNotification({ show: true, message: 'AI 规划完成，行程天数已更新' });
+          setNotification({ show: true, message: 'AI 规划完成，已自动匹配最优资源' });
       } else {
           alert('AI 生成失败，请重试');
       }
@@ -811,7 +1210,6 @@ export default function App() {
       setShowAIModal(false);
   };
 
-  // --- Render ---
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
       {/* Top Bar */}
@@ -822,12 +1220,72 @@ export default function App() {
            </h1>
            <div className="flex items-center gap-2">
               <button onClick={handleNewTrip} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="新建"><FileUp size={18}/></button>
-              <button onClick={() => setShowSavedList(true)} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="打开"><FolderOpen size={18}/></button>
+              <button 
+                  onClick={async () => {
+                      if (isRefreshingTrips) return;
+                      setIsRefreshingTrips(true);
+                      setCloudStatus('syncing');
+                      try {
+                          // Force fetch latest trips from cloud
+                          const trips = await StorageService.getTrips();
+                          setSavedTrips(trips);
+                          setCloudStatus('synced');
+                          setShowSavedList(true);
+                      } catch (error) {
+                          console.error("Failed to refresh trips", error);
+                          setCloudStatus('error');
+                          setShowSavedList(true);
+                      } finally {
+                          setIsRefreshingTrips(false);
+                      }
+                  }} 
+                  className="p-2 hover:bg-gray-100 rounded text-gray-600 flex items-center gap-1" 
+                  title="打开行程库 (将同步最新云端数据)"
+              >
+                  {isRefreshingTrips ? <Loader2 size={18} className="animate-spin text-blue-600"/> : <FolderOpen size={18}/>}
+              </button>
               <button onClick={handleOpenSaveModal} className="p-2 hover:bg-gray-100 rounded text-blue-600" title="保存"><Save size={18}/></button>
               <button onClick={handleExport} className="p-2 hover:bg-gray-100 rounded text-green-600" title="导出"><FileSpreadsheet size={18}/></button>
            </div>
            <div className="h-6 w-px bg-gray-300 mx-2"></div>
-           <button onClick={() => setIsResourceOpen(true)} className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 text-sm font-medium"><Database size={16}/> 资源库</button>
+           <button 
+                onClick={async () => {
+                    if (isRefreshingResources) return;
+                    setIsRefreshingResources(true);
+                    setCloudStatus('syncing');
+                    try {
+                        // Force fetch latest resources from cloud
+                        const [cars, cities, spots, hotels, activities, files] = await Promise.all([
+                            StorageService.getCars(),
+                            StorageService.getCities(),
+                            StorageService.getSpots(),
+                            StorageService.getHotels(),
+                            StorageService.getActivities(),
+                            StorageService.getFiles()
+                        ]);
+                        setCarDB(cars);
+                        setPoiCities(cities);
+                        setPoiSpots(spots);
+                        setPoiHotels(hotels);
+                        setPoiActivities(activities);
+                        setCountryFiles(files);
+                        setCloudStatus('synced');
+                        setIsResourceOpen(true);
+                    } catch (error) {
+                        console.error("Failed to refresh resources", error);
+                        setCloudStatus('error');
+                        // Still open to avoid lockout, data might be stale
+                        setIsResourceOpen(true);
+                    } finally {
+                        setIsRefreshingResources(false);
+                    }
+                }} 
+                className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 text-sm font-medium transition-colors"
+                title="打开资源库 (将同步最新云端数据)"
+           >
+               {isRefreshingResources ? <Loader2 size={16} className="animate-spin"/> : <Database size={16}/>} 
+               资源库
+           </button>
            <button onClick={() => setShowAIModal(true)} className="flex items-center gap-1 px-3 py-1.5 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 text-sm font-medium"><Sparkles size={16}/> AI 规划</button>
         </div>
         <div className="flex items-center gap-4">
@@ -927,7 +1385,22 @@ export default function App() {
                             return (
                             <tr key={row.id} className="hover:bg-blue-50/30 group">
                                 <td className="p-2 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 font-medium text-center text-gray-400">{row.dayIndex}</td>
-                                <td className="p-2"><input type="date" className="w-full border-none bg-transparent p-0 text-gray-600 text-xs focus:ring-0" value={row.date} onChange={(e) => updateRow(index, { date: e.target.value })} /></td>
+                                <td className="p-2">
+                                    <input 
+                                        type="date" 
+                                        className="w-full border-none bg-transparent p-0 text-gray-600 text-xs focus:ring-0" 
+                                        value={row.date} 
+                                        onChange={(e) => {
+                                            const newDate = e.target.value;
+                                            if (index === 0) {
+                                                // Changing Day 1 updates the global start date, which triggers the sequence update for all rows
+                                                setSettings(prev => ({ ...prev, startDate: newDate }));
+                                            } else {
+                                                updateRow(index, { date: newDate });
+                                            }
+                                        }} 
+                                    />
+                                </td>
                                 <td className="p-2">
                                     <div className="flex items-center justify-between gap-1">
                                         <div className="flex-1">
@@ -945,10 +1418,26 @@ export default function App() {
                                 <td className="p-2">
                                     <div className="flex flex-col gap-1">
                                         <MultiSelect options={Object.values(TransportType)} value={row.transport} onChange={(v) => updateRow(index, { transport: v })} className="w-full" />
-                                        {row.transport.includes('包车') && (
-                                            <select className="text-xs border border-gray-200 rounded p-1 w-full mt-1 bg-gray-50" value={row.carModel} onChange={(e) => updateRow(index, { carModel: e.target.value })}>
+                                        {(row.transport.includes('包车') || row.transport.includes('接送机')) && (
+                                            <select 
+                                                className="text-xs border border-gray-200 rounded p-1 w-full mt-1 bg-gray-50" 
+                                                value={row.carModel} 
+                                                onChange={(e) => handleCarModelChange(index, e.target.value)}
+                                            >
                                                 <option value="">选择车型...</option>
-                                                {carDB.filter(c => settings.destinations.includes(c.region) || c.region === '通用').map(c => <option key={c.id} value={c.carModel}>{c.carModel} ({c.priceLow})</option>)}
+                                                {carDB
+                                                    .filter(c => {
+                                                        const inRegion = settings.destinations.includes(c.region) || c.region === '通用' || c.region === 'General';
+                                                        if (!inRegion) return false;
+                                                        // Filter by service type if possible to reduce noise
+                                                        const isCharter = row.transport.includes('包车');
+                                                        const isTransfer = row.transport.includes('接送机');
+                                                        if (isCharter && isTransfer) return true; // Show all
+                                                        if (isCharter) return c.serviceType === '包车';
+                                                        if (isTransfer) return c.serviceType === '接送机' || c.serviceType === '接机' || c.serviceType === '送机';
+                                                        return true;
+                                                    })
+                                                    .map(c => <option key={c.id} value={c.carModel}>{c.carModel} - {c.serviceType} ({c.priceLow})</option>)}
                                             </select>
                                         )}
                                     </div>
@@ -967,7 +1456,7 @@ export default function App() {
                                             onChange={(e) => handleRoomTypeChange(index, e.target.value)}
                                         >
                                             {roomOptions.map(h => (
-                                                <option key={h.id} value={h.roomType}>{h.roomType} ({h.price})</option>
+                                                <option key={h.id} value={h.roomType}>{h.roomType} ({isAdmin ? h.price : maskNumber(h.price)})</option>
                                             ))}
                                             {!roomOptions.some(h => h.roomType === row.hotelRoomType) && row.hotelRoomType && (
                                                 <option value={row.hotelRoomType}>
@@ -982,7 +1471,7 @@ export default function App() {
                                     <MultiSelect 
                                         options={validSpotNames} 
                                         value={row.ticketName} 
-                                        onChange={(v) => updateRow(index, { ticketName: v })} 
+                                        onChange={(v) => handleTicketChange(index, v)} 
                                         placeholder={validSpotNames.length ? "选择景点..." : "暂无景点"}
                                     />
                                     <button tabIndex={-1} onClick={() => handleQuickSave('ticket', index)} className="absolute right-1 top-2 opacity-0 group-hover/cell:opacity-100 text-blue-300 hover:text-blue-600"><PlusCircle size={14}/></button>
@@ -991,18 +1480,51 @@ export default function App() {
                                     <MultiSelect 
                                         options={validActivityNames} 
                                         value={row.activityName} 
-                                        onChange={(v) => updateRow(index, { activityName: v })} 
+                                        onChange={(v) => handleActivityChange(index, v)} 
                                         placeholder={validActivityNames.length ? "选择活动..." : "暂无活动"} 
                                     />
                                     <button tabIndex={-1} onClick={() => handleQuickSave('activity', index)} className="absolute right-1 top-2 opacity-0 group-hover/cell:opacity-100 text-blue-300 hover:text-blue-600"><PlusCircle size={14}/></button>
                                 </td>
                                 <td className="p-2"><textarea className="w-full border-none bg-transparent p-0 text-sm focus:ring-0 resize-y min-h-[2.5rem]" rows={1} value={row.description} onChange={(e) => updateRow(index, { description: e.target.value })} /></td>
                                 <td className="p-2"><input type="number" min="0" className="w-full border-none bg-transparent p-0 text-center focus:ring-0" value={row.rooms} onChange={(e) => handleRoomsChange(index, parseInt(e.target.value)||0)} /></td>
-                                <td className="p-2"><input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.transportCost} onChange={(e) => updateRow(index, { transportCost: parseFloat(e.target.value)||0 })} /></td>
-                                <td className="p-2"><input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.hotelCost} onChange={(e) => updateRow(index, { hotelCost: parseFloat(e.target.value)||0 })} /></td>
-                                <td className="p-2"><input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.ticketCost} onChange={(e) => updateRow(index, { ticketCost: parseFloat(e.target.value)||0 })} /></td>
-                                <td className="p-2"><input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.activityCost} onChange={(e) => updateRow(index, { activityCost: parseFloat(e.target.value)||0 })} /></td>
-                                <td className="p-2"><input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.otherCost} onChange={(e) => updateRow(index, { otherCost: parseFloat(e.target.value)||0 })} /></td>
+                                
+                                {/* MASKED COLUMNS */}
+                                <td className="p-2 text-right">
+                                    {isAdmin ? (
+                                        <input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.transportCost} onChange={(e) => updateRow(index, { transportCost: parseFloat(e.target.value)||0, manualCostFlags: { ...row.manualCostFlags, transport: true } })} />
+                                    ) : (
+                                        <span className="text-gray-500 text-sm font-mono">{maskNumber(row.transportCost)}</span>
+                                    )}
+                                </td>
+                                <td className="p-2 text-right">
+                                    {isAdmin ? (
+                                        <input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.hotelCost} onChange={(e) => updateRow(index, { hotelCost: parseFloat(e.target.value)||0, manualCostFlags: { ...row.manualCostFlags, hotel: true } })} />
+                                    ) : (
+                                        <span className="text-gray-500 text-sm font-mono">{maskNumber(row.hotelCost)}</span>
+                                    )}
+                                </td>
+                                <td className="p-2 text-right">
+                                    {isAdmin ? (
+                                        <input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.ticketCost} onChange={(e) => updateRow(index, { ticketCost: parseFloat(e.target.value)||0, manualCostFlags: { ...row.manualCostFlags, ticket: true } })} />
+                                    ) : (
+                                        <span className="text-gray-500 text-sm font-mono">{maskNumber(row.ticketCost)}</span>
+                                    )}
+                                </td>
+                                <td className="p-2 text-right">
+                                    {isAdmin ? (
+                                        <input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.activityCost} onChange={(e) => updateRow(index, { activityCost: parseFloat(e.target.value)||0, manualCostFlags: { ...row.manualCostFlags, activity: true } })} />
+                                    ) : (
+                                        <span className="text-gray-500 text-sm font-mono">{maskNumber(row.activityCost)}</span>
+                                    )}
+                                </td>
+                                <td className="p-2 text-right">
+                                    {isAdmin ? (
+                                        <input type="number" className="w-full border-none bg-transparent p-0 text-right focus:ring-0 text-gray-500" value={row.otherCost} onChange={(e) => updateRow(index, { otherCost: parseFloat(e.target.value)||0, manualCostFlags: { ...row.manualCostFlags, other: true } })} />
+                                    ) : (
+                                        <span className="text-gray-500 text-sm font-mono">{maskNumber(row.otherCost)}</span>
+                                    )}
+                                </td>
+                                
                                 <td className="p-2 text-center sticky right-0 bg-white group-hover:bg-blue-50/30 z-10"><button onClick={() => handleDeleteRow(index)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button></td>
                             </tr>
                         );
@@ -1011,29 +1533,40 @@ export default function App() {
                     <tfoot className="bg-gray-50 font-bold text-gray-700">
                         <tr>
                             <td colSpan={9} className="p-3 text-right">总计成本 ({settings.currency}):</td>
-                            <td className="p-3 text-right text-blue-600">{rows.reduce((a,r) => a+r.transportCost, 0).toLocaleString()}</td>
-                            <td className="p-3 text-right text-blue-600">{rows.reduce((a,r) => a+r.hotelCost, 0).toLocaleString()}</td>
-                            <td className="p-3 text-right text-blue-600">{rows.reduce((a,r) => a+r.ticketCost, 0).toLocaleString()}</td>
-                            <td className="p-3 text-right text-blue-600">{rows.reduce((a,r) => a+r.activityCost, 0).toLocaleString()}</td>
-                            <td className="p-3 text-right text-blue-600">{rows.reduce((a,r) => a+r.otherCost, 0).toLocaleString()}</td>
+                            {/* Masked Footer Totals */}
+                            <td className="p-3 text-right text-blue-600">{isAdmin ? rows.reduce((a,r) => a+r.transportCost, 0).toLocaleString() : maskNumber(rows.reduce((a,r) => a+r.transportCost, 0))}</td>
+                            <td className="p-3 text-right text-blue-600">{isAdmin ? rows.reduce((a,r) => a+r.hotelCost, 0).toLocaleString() : maskNumber(rows.reduce((a,r) => a+r.hotelCost, 0))}</td>
+                            <td className="p-3 text-right text-blue-600">{isAdmin ? rows.reduce((a,r) => a+r.ticketCost, 0).toLocaleString() : maskNumber(rows.reduce((a,r) => a+r.ticketCost, 0))}</td>
+                            <td className="p-3 text-right text-blue-600">{isAdmin ? rows.reduce((a,r) => a+r.activityCost, 0).toLocaleString() : maskNumber(rows.reduce((a,r) => a+r.activityCost, 0))}</td>
+                            <td className="p-3 text-right text-blue-600">{isAdmin ? rows.reduce((a,r) => a+r.otherCost, 0).toLocaleString() : maskNumber(rows.reduce((a,r) => a+r.otherCost, 0))}</td>
                             <td></td>
                         </tr>
                         <tr>
                             <td colSpan={9} className="p-3">
                                 <div className="flex items-center justify-end gap-4 h-full">
-                                    <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-                                        <span className="text-xs font-medium text-blue-800">利润率</span>
-                                        <input 
-                                            type="range" 
-                                            min="0" 
-                                            max="60" 
-                                            step="1" 
-                                            value={settings.marginPercent} 
-                                            onChange={(e) => setSettings(prev => ({...prev, marginPercent: parseInt(e.target.value) || 0}))}
-                                            className="w-24 h-1.5 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                                        />
-                                        <span className="text-xs font-bold text-blue-800 w-8 text-right">{settings.marginPercent}%</span>
-                                    </div>
+                                    <button 
+                                        onClick={() => setShowAIModal(true)} 
+                                        className="flex items-center gap-1 text-purple-600 bg-purple-50 hover:bg-purple-100 px-3 py-1 rounded-full border border-purple-200 text-xs font-bold transition-colors mr-2"
+                                        title="基于现有行程进行智能调整"
+                                    >
+                                        <Wand2 size={14} /> AI 行程优化
+                                    </button>
+
+                                    {isAdmin && (
+                                        <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
+                                            <span className="text-xs font-medium text-blue-800">利润率</span>
+                                            <input 
+                                                type="range" 
+                                                min="0" 
+                                                max="60" 
+                                                step="1" 
+                                                value={settings.marginPercent} 
+                                                onChange={(e) => setSettings(prev => ({...prev, marginPercent: parseInt(e.target.value) || 0}))}
+                                                className="w-24 h-1.5 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                            />
+                                            <span className="text-xs font-bold text-blue-800 w-8 text-right">{settings.marginPercent}%</span>
+                                        </div>
+                                    )}
                                     <span className="font-bold text-gray-700">总报价:</span>
                                 </div>
                             </td>
@@ -1073,7 +1606,15 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {showAuthModal && <AuthModal onLoginSuccess={(u) => { setCurrentUser(u); setShowAuthModal(false); }} />}
+      {showAuthModal && <AuthModal onLoginSuccess={async (u) => { 
+          setCurrentUser(u); 
+          setShowAuthModal(false);
+          setIsAppLoading(true); // Show global loading
+          await loadCloudData(u); 
+          setIsAppLoading(false);
+          setNotification({ show: true, message: `欢迎回来, ${u.username}` });
+          setTimeout(() => setNotification({ show: false, message: '' }), 3000);
+      }} />}
       {showAdminDashboard && currentUser && <AdminDashboard currentUser={currentUser} onClose={() => setShowAdminDashboard(false)} />}
       <ResourceDatabase 
         isOpen={isResourceOpen} 
@@ -1081,6 +1622,9 @@ export default function App() {
         carDB={carDB} poiCities={poiCities} poiSpots={poiSpots} poiHotels={poiHotels} poiActivities={poiActivities} countryFiles={countryFiles}
         onUpdateCarDB={setCarDB} onUpdatePoiCities={setPoiCities} onUpdatePoiSpots={setPoiSpots} onUpdatePoiHotels={setPoiHotels} onUpdatePoiActivities={setPoiActivities} onUpdateCountryFiles={setCountryFiles}
         isReadOnly={currentUser?.role !== 'admin'}
+        currentUser={currentUser}
+        onActivity={handleResourceActivity}
+        onForceSave={handleForceSave}
       />
       
       {/* Save Modal */}
@@ -1225,7 +1769,7 @@ export default function App() {
                       <X size={20}/>
                   </button>
                   <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-purple-600">
-                      <Wand2 size={20}/> AI 智能行程规划
+                      <Wand2 size={20}/> AI 智能行程规划/优化
                   </h3>
                   
                   <div className="space-y-4">
@@ -1235,7 +1779,7 @@ export default function App() {
                           <ul className="list-disc list-inside mt-1 ml-2 space-y-1 text-xs">
                               <li>"帮我设计一个日本7天行程，想去东京和京都，喜欢吃日料和看寺庙。"</li>
                               <li>"计划去法国和瑞士10天，两个人，预算充足，想要浪漫一点的安排。"</li>
-                              <li>"带孩子去新加坡5天，需要安排亲子活动。"</li>
+                              <li><strong>(现有行程优化)</strong> "把第3天的行程改轻松点，去掉爬山活动。"</li>
                           </ul>
                       </div>
                       
@@ -1243,7 +1787,7 @@ export default function App() {
                           <label className="block text-sm font-medium text-gray-700 mb-1">您的需求指令</label>
                           <textarea 
                               className="w-full h-32 border border-gray-300 rounded-lg p-3 focus:ring-purple-500 focus:border-purple-500 text-sm"
-                              placeholder="在此输入您的规划要求..."
+                              placeholder="在此输入您的规划或修改要求..."
                               value={aiPromptInput}
                               onChange={(e) => setAiPromptInput(e.target.value)}
                           ></textarea>

@@ -4,8 +4,7 @@ export enum TransportType {
   PrivateCar = '包车',
   Intercity = '城际',
   Carpool = '拼车',
-  Pickup = '接机',
-  Dropoff = '送机',
+  PickupDropoff = '接送机',
   Train = '火车',
   Ship = '轮船',
   Other = '其它'
@@ -41,6 +40,15 @@ export interface DayRow {
   
   // Custom dynamic costs
   customCosts: Record<string, number>; // Key is custom column ID
+
+  // Track manual overrides
+  manualCostFlags?: {
+    transport?: boolean;
+    hotel?: boolean;
+    ticket?: boolean;
+    activity?: boolean;
+    other?: boolean;
+  };
 }
 
 export interface CustomColumn {
@@ -86,6 +94,8 @@ export interface CarCostEntry {
   passengers: number; // "顾客数" (New)
   priceLow: number; // "淡季价格" (New)
   priceHigh: number; // "旺季价格" (New)
+  description?: string; // New: 备注说明
+  lastUpdated?: number; // New: 更新时间戳
 }
 
 export interface PoiCity {
@@ -99,6 +109,8 @@ export interface PoiSpot {
   cityId: string;
   name: string;
   price: number;
+  description?: string; // New: 备注说明
+  lastUpdated?: number; // New: 更新时间戳
 }
 
 export interface PoiHotel {
@@ -107,6 +119,8 @@ export interface PoiHotel {
   name: string;
   roomType: string;
   price: number;
+  description?: string; // New: 备注说明
+  lastUpdated?: number; // New: 更新时间戳
 }
 
 export interface PoiActivity {
@@ -114,6 +128,8 @@ export interface PoiActivity {
   cityId: string;
   name: string;
   price: number;
+  description?: string; // New: 备注说明
+  lastUpdated?: number; // New: 更新时间戳
 }
 
 // New: File Storage for Countries
@@ -125,6 +141,12 @@ export interface CountryFile {
   size: number;
   data: string; // Base64
   uploadDate: number;
+}
+
+// New: Metadata for Database Updates
+export interface ResourceMetadata {
+  lastUpdated: number;
+  updatedBy: string;
 }
 
 // --- Auth & Admin Types ---

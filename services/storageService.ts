@@ -1,5 +1,5 @@
 
-import { SavedTrip, CarCostEntry, PoiCity, PoiSpot, PoiHotel, PoiActivity, CountryFile, User } from '../types';
+import { SavedTrip, CarCostEntry, PoiCity, PoiSpot, PoiHotel, PoiActivity, CountryFile, User, ResourceMetadata } from '../types';
 import { SupabaseManager } from './supabaseClient';
 
 const KEYS = {
@@ -9,9 +9,11 @@ const KEYS = {
   DB_HOTELS: 'travel_builder_db_poi_hotels_v2',
   DB_ACTIVITIES: 'travel_builder_db_poi_activities',
   DB_FILES: 'travel_builder_db_country_files',
+  DB_METADATA: 'travel_builder_db_metadata', // New Key
   HISTORY: 'travel_builder_history',
   LOCATIONS: 'travel_builder_locations_history',
-  SETTINGS_GLOBAL: 'travel_builder_settings_global'
+  SETTINGS_GLOBAL: 'travel_builder_settings_global',
+  SYSTEM_CONFIG: 'travel_builder_system_config' // New Key for system-wide settings
 };
 
 const db = {
@@ -71,6 +73,14 @@ export const StorageService = {
   async getFiles(): Promise<CountryFile[]> { return db.get(KEYS.DB_FILES, []); },
   async getTrips(): Promise<SavedTrip[]> { return db.get(KEYS.HISTORY, []); },
   async getLocations(): Promise<string[]> { return db.get(KEYS.LOCATIONS, []); },
+  
+  // New Metadata methods
+  async getResourceMetadata(): Promise<ResourceMetadata | null> { return db.get(KEYS.DB_METADATA, null); },
+  async saveResourceMetadata(meta: ResourceMetadata): Promise<void> { return db.set(KEYS.DB_METADATA, meta); },
+
+  // System Config
+  async getSystemConfig(): Promise<{ defaultMargin: number }> { return db.get(KEYS.SYSTEM_CONFIG, { defaultMargin: 20 }); },
+  async saveSystemConfig(config: { defaultMargin: number }): Promise<void> { return db.set(KEYS.SYSTEM_CONFIG, config); },
 
   async saveCars(data: CarCostEntry[]): Promise<void> { return db.set(KEYS.DB_CARS, data); },
   async saveCities(data: PoiCity[]): Promise<void> { return db.set(KEYS.DB_CITIES, data); },
@@ -121,6 +131,47 @@ export const StorageService = {
 
   async saveAppSettings(settings: any): Promise<void> {
     return db.set(KEYS.SETTINGS_GLOBAL, settings);
+  },
+
+  // --- Migration: LocalStorage -> Cloud ---
+  // This ensures that if a user was using a local-only version, their data is synced to cloud upon upgrade.
+  async migrateLocalData(): Promise<void> {
+      console.log("Checking for local data migration...");
+      const client = SupabaseManager.getClient();
+      if (!client) return;
+
+      const keysToMigrate = [
+          KEYS.DB_CARS,
+          KEYS.DB_CITIES,
+          KEYS.DB_SPOTS,
+          KEYS.DB_HOTELS,
+          KEYS.DB_ACTIVITIES,
+          KEYS.HISTORY,
+          KEYS.LOCATIONS,
+          KEYS.SETTINGS_GLOBAL,
+          KEYS.SYSTEM_CONFIG
+      ];
+
+      for (const key of keysToMigrate) {
+          try {
+              // 1. Check if Cloud is empty
+              const cloudData = await db.get(key, null);
+              const isEmpty = !cloudData || (Array.isArray(cloudData) && cloudData.length === 0);
+
+              // 2. Check if Local has data
+              const localJson = localStorage.getItem(key);
+              
+              if (isEmpty && localJson) {
+                  const localData = JSON.parse(localJson);
+                  if (localData && (Array.isArray(localData) ? localData.length > 0 : Object.keys(localData).length > 0)) {
+                      console.log(`Migrating ${key} from LocalStorage to Cloud...`);
+                      await db.set(key, localData);
+                  }
+              }
+          } catch (e) {
+              console.error(`Migration failed for ${key}`, e);
+          }
+      }
   },
 
   // --- Full Backup & Restore ---

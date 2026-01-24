@@ -1,9 +1,9 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Trash2, X, Car, Hotel, Globe, MapPin, Search, Ticket, Palmtree, RotateCcw, FileSpreadsheet, Upload, Loader2, Check, AlertCircle, Info, Lock, FileText, Image as ImageIcon, Paperclip, Eye, Download, File as FileIcon, GitMerge } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { CarCostEntry, PoiCity, PoiSpot, PoiHotel, PoiActivity, CountryFile } from '../types';
+import { CarCostEntry, PoiCity, PoiSpot, PoiHotel, PoiActivity, CountryFile, User } from '../types';
 import { generateUUID } from '../utils/dateUtils';
-import { generateSeedData } from '../utils/seedData';
 
 interface ResourceDatabaseProps {
   isOpen: boolean;
@@ -24,13 +24,19 @@ interface ResourceDatabaseProps {
   onUpdateCountryFiles: (files: CountryFile[]) => void; // New prop
   // Permissions
   isReadOnly?: boolean;
+  currentUser?: User | null;
+  onActivity?: (username: string) => void;
+  onForceSave?: () => void; // Trigger immediate save
 }
 
 export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
   isOpen, onClose,
   carDB, poiCities, poiSpots, poiHotels, poiActivities, countryFiles,
   onUpdateCarDB, onUpdatePoiCities, onUpdatePoiSpots, onUpdatePoiHotels, onUpdatePoiActivities, onUpdateCountryFiles,
-  isReadOnly = false
+  isReadOnly = false,
+  currentUser,
+  onActivity,
+  onForceSave
 }) => {
   // Navigation State
   const [selectedCountry, setSelectedCountry] = useState<string>('');
@@ -55,9 +61,67 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
   // Preview Modal State
   const [previewFile, setPreviewFile] = useState<CountryFile | null>(null);
 
+  // Column Width State
+  const [colWidths, setColWidths] = useState<Record<string, number>>({
+      t_model: 140, t_service: 120, t_pax: 80, t_priceLow: 100, t_priceHigh: 100, t_desc: 300, t_updated: 100,
+      s_name: 200, s_price: 120, s_desc: 300, s_updated: 100,
+      h_name: 200, h_details: 600,
+      a_name: 200, a_price: 120, a_desc: 300, a_updated: 100
+  });
+
   // File Input Ref
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docUploadRef = useRef<HTMLInputElement>(null);
+
+  // Masking Helper
+  const maskPrice = (price: number): string => {
+      if (!isReadOnly) return price.toString();
+      const s = Math.round(price).toString();
+      if (s.length <= 1) return s;
+      return s[0] + '*'.repeat(s.length - 1);
+  };
+
+  const formatDate = (ts?: number) => {
+      if (!ts) return '-';
+      return new Date(ts).toLocaleDateString();
+  };
+
+  // Resize Handler
+  const startResize = (e: React.MouseEvent, id: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.pageX;
+      const startW = colWidths[id] || 100;
+      const onMove = (mv: MouseEvent) => {
+          const newW = Math.max(50, startW + (mv.pageX - startX));
+          setColWidths(prev => ({ ...prev, [id]: newW }));
+      };
+      const onUp = () => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+  };
+
+  // Helper to render Resizable Th
+  const ResizableTh = (id: string, label: string, textColorClass = "text-gray-500") => {
+      const w = colWidths[id] || 100;
+      return (
+          <th style={{ width: w, minWidth: w }} className={`relative px-4 py-3 text-left text-xs font-medium uppercase group ${textColorClass}`}>
+             <div className="flex items-center justify-between w-full h-full">
+                 <span className="truncate">{label}</span>
+                 <div 
+                    className="absolute -right-2 top-0 bottom-0 w-4 cursor-col-resize z-10 flex justify-center hover:bg-blue-100 rounded"
+                    onMouseDown={(e) => startResize(e, id)}
+                    onClick={(e) => e.stopPropagation()}
+                 >
+                    <div className="w-[1px] h-full bg-gray-200 group-hover:bg-blue-400"></div>
+                 </div>
+             </div>
+          </th>
+      );
+  };
 
   // Computed Lists (Hooks MUST be unconditional)
   const countries = useMemo(() => {
@@ -109,6 +173,19 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
   if (!isOpen) return null;
 
   // --- Helpers ---
+  const markAsUpdated = () => {
+      if (onActivity && currentUser) {
+          onActivity(currentUser.username);
+      }
+  };
+
+  const handleEnter = (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
+      if (e.key === 'Enter') {
+          e.currentTarget.blur();
+          if (onForceSave) onForceSave();
+      }
+  };
+
   const fileToBase64 = (file: File): Promise<string> => {
       return new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -151,6 +228,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
 
       if (newFiles.length > 0) {
           onUpdateCountryFiles([...countryFiles, ...newFiles]);
+          markAsUpdated();
       }
       
       if(docUploadRef.current) docUploadRef.current.value = '';
@@ -160,6 +238,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
       if (isReadOnly) return;
       if (window.confirm("确定删除此文件吗？")) {
           onUpdateCountryFiles(countryFiles.filter(f => f.id !== id));
+          markAsUpdated();
       }
   };
 
@@ -183,18 +262,6 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
   };
 
   // --- Logic Helpers ---
-  const handleRestoreDefaults = () => {
-    if(isReadOnly) return;
-    if (countries.length === 0 || window.confirm("警告：此操作将清空当前的成本库，并恢复为初始演示数据。\n\n是否确定？")) {
-        const seed = generateSeedData();
-        onUpdateCarDB(seed.cars);
-        onUpdatePoiCities(seed.cities);
-        onUpdatePoiSpots(seed.spots);
-        onUpdatePoiHotels(seed.hotels);
-        onUpdatePoiActivities(seed.activities);
-        if (countries.length > 0) alert("已恢复默认数据。");
-    }
-  };
   
   const handleExportDatabase = () => {
       const wb = XLSX.utils.book_new();
@@ -206,7 +273,9 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
           "服务": c.serviceType,
           "顾客数": c.passengers,
           "淡季价格": c.priceLow,
-          "旺季价格": c.priceHigh
+          "旺季价格": c.priceHigh,
+          "备注": c.description || '',
+          "更新日期": formatDate(c.lastUpdated)
       }));
       const wsCars = XLSX.utils.json_to_sheet(carsData);
       XLSX.utils.book_append_sheet(wb, wsCars, "交通配置");
@@ -224,7 +293,9 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
               "国家": loc.country,
               "城市": loc.city,
               "景点名称": s.name,
-              "价格": s.price
+              "价格": s.price,
+              "备注": s.description || '',
+              "更新日期": formatDate(s.lastUpdated)
           };
       });
       const wsSpots = XLSX.utils.json_to_sheet(spotsData);
@@ -238,7 +309,9 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                "城市": loc.city,
                "酒店名称": h.name,
                "房型": h.roomType,
-               "价格": h.price
+               "价格": h.price,
+               "备注": h.description || '',
+               "更新日期": formatDate(h.lastUpdated)
            };
       });
       const wsHotels = XLSX.utils.json_to_sheet(hotelsData);
@@ -251,7 +324,9 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                "国家": loc.country,
                "城市": loc.city,
                "活动名称": a.name,
-               "价格": a.price
+               "价格": a.price,
+               "备注": a.description || '',
+               "更新日期": formatDate(a.lastUpdated)
            };
       });
       const wsActs = XLSX.utils.json_to_sheet(actsData);
@@ -374,6 +449,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                 if (totalImported > 0) {
                     setImportStatus('success');
                     setImportFeedback(`✅ 导入成功！共 ${totalImported} 条 (${summary.join(', ')})`);
+                    markAsUpdated();
                 } else {
                     setImportStatus('error');
                     setImportFeedback("未识别到有效数据，请检查表头或工作表名称。");
@@ -398,14 +474,10 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
   };
 
   // Helper to find or create IDs
-  // NOTE: This modifies local arrays, so we must be careful to pass the latest arrays
   const ensureLocation = (countryName: string, cityName: string | null, currentCities: PoiCity[]): { cityId: string | null, updatedCities: PoiCity[] } => {
       if (!countryName) return { cityId: null, updatedCities: currentCities };
       
       let updatedList = [...currentCities];
-      
-      // We don't need to explicitly create countries as they are derived from cities/cars
-      // But we DO need to create the City if it doesn't exist.
       
       let cityId = null;
       if (cityName) {
@@ -427,6 +499,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
       const idxModel = getColIndex(headers, ['车型', '车型及描述', 'Car', 'Model', 'Vehicle']);
       const idxService = getColIndex(headers, ['服务', '服务类型', 'Service', 'Type', 'Category']);
       const idxPax = getColIndex(headers, ['顾客', '人数', 'Passengers', 'Pax', 'Capacity', 'Guest']);
+      const idxDesc = getColIndex(headers, ['备注', '说明', 'Description', 'Remark', 'Note']);
       
       const idxPriceLow = getColIndex(headers, ['淡季', 'Low', 'Off']);
       const idxPriceHigh = getColIndex(headers, ['旺季', 'High', 'Peak']);
@@ -443,6 +516,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
           const model = getValue(row, idxModel);
           const service = idxService >= 0 ? getValue(row, idxService) : '包车';
           const pax = idxPax >= 0 ? getNumValue(row, idxPax) : 4;
+          const desc = getValue(row, idxDesc);
           
           let priceLow = 0;
           let priceHigh = 0;
@@ -467,7 +541,9 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                       serviceType: service,
                       passengers: pax,
                       priceLow: priceLow,
-                      priceHigh: priceHigh
+                      priceHigh: priceHigh,
+                      description: desc,
+                      lastUpdated: Date.now()
                   });
                   count++;
               }
@@ -482,6 +558,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
       const idxCity = getColIndex(headers, LOCATION_HEADERS);
       const idxName = getColIndex(headers, ['景点名称', '景点', 'Spot', 'Name', 'Scenic']);
       const idxPrice = getColIndex(headers, ['价格', '门票', 'Price', 'Ticket', 'Cost']);
+      const idxDesc = getColIndex(headers, ['备注', '说明', 'Description', 'Remark', 'Note']);
 
       if (idxCountry < 0 || idxCity < 0 || idxName < 0) return 0;
 
@@ -494,6 +571,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
           const city = getValue(row, idxCity);
           const name = getValue(row, idxName);
           const price = getNumValue(row, idxPrice);
+          const desc = getValue(row, idxDesc);
 
           if (country && city && name) {
               const { cityId, updatedCities } = ensureLocation(country, city, tempCities);
@@ -502,7 +580,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
               if (cityId) {
                   const exists = tempSpots.some(s => s.cityId === cityId && s.name === name);
                   if (!exists) {
-                      tempSpots.push({ id: generateUUID(), cityId, name, price });
+                      tempSpots.push({ id: generateUUID(), cityId, name, price, description: desc, lastUpdated: Date.now() });
                       count++;
                   }
               }
@@ -520,6 +598,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
       const idxName = getColIndex(headers, ['酒店名称', '酒店', 'Hotel', 'Name', 'Accommodation']);
       const idxRoom = getColIndex(headers, ['房型', 'Room', 'Type', 'Bed']);
       const idxPrice = getColIndex(headers, ['价格', 'Price', 'Cost']);
+      const idxDesc = getColIndex(headers, ['备注', '说明', 'Description', 'Remark', 'Note']);
 
       if (idxCountry < 0 || idxCity < 0 || idxName < 0 || idxRoom < 0) return 0;
 
@@ -533,6 +612,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
           const name = getValue(row, idxName);
           const room = getValue(row, idxRoom);
           const price = getNumValue(row, idxPrice);
+          const desc = getValue(row, idxDesc);
 
           if (country && city && name && room) {
               const { cityId, updatedCities } = ensureLocation(country, city, tempCities);
@@ -541,7 +621,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
               if (cityId) {
                   const exists = tempHotels.some(h => h.cityId === cityId && h.name === name && h.roomType === room);
                   if (!exists) {
-                      tempHotels.push({ id: generateUUID(), cityId, name, roomType: room, price });
+                      tempHotels.push({ id: generateUUID(), cityId, name, roomType: room, price, description: desc, lastUpdated: Date.now() });
                       count++;
                   }
               }
@@ -558,6 +638,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
       const idxCity = getColIndex(headers, LOCATION_HEADERS);
       const idxName = getColIndex(headers, ['活动名称', '活动', 'Activity', 'Name', 'Experience']);
       const idxPrice = getColIndex(headers, ['价格', 'Price', 'Cost']);
+      const idxDesc = getColIndex(headers, ['备注', '说明', 'Description', 'Remark', 'Note']);
 
       if (idxCountry < 0 || idxCity < 0 || idxName < 0) return 0;
 
@@ -570,6 +651,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
           const city = getValue(row, idxCity);
           const name = getValue(row, idxName);
           const price = getNumValue(row, idxPrice);
+          const desc = getValue(row, idxDesc);
 
           if (country && city && name) {
               const { cityId, updatedCities } = ensureLocation(country, city, tempCities);
@@ -578,7 +660,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
               if (cityId) {
                   const exists = tempActivities.some(a => a.cityId === cityId && a.name === name);
                   if (!exists) {
-                      tempActivities.push({ id: generateUUID(), cityId, name, price });
+                      tempActivities.push({ id: generateUUID(), cityId, name, price, description: desc, lastUpdated: Date.now() });
                       count++;
                   }
               }
@@ -620,7 +702,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
             )}
             {isReadOnly && (
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-500 rounded text-sm">
-                    <Lock size={14}/> 资源库只读模式 (仅管理员可编辑)
+                    <Lock size={14}/> 资源库只读模式 (价格已脱敏)
                 </div>
             )}
         </div>
@@ -660,10 +742,12 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
             carModel: '适配车型', 
             serviceType: '包车',
             passengers: 4,
-            priceLow: 2000,
-            priceHigh: 2000
+            priceLow: 0,
+            priceHigh: 0,
+            lastUpdated: Date.now()
         };
         onUpdateCarDB([...carDB, newCarEntry]);
+        markAsUpdated();
     }
 
     setSelectedCountry(name);
@@ -683,6 +767,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
        onUpdatePoiActivities(poiActivities.filter(a => !cityIds.includes(a.cityId)));
        onUpdateCountryFiles(countryFiles.filter(f => f.country !== country)); // Delete files
        if (selectedCountry === country) setSelectedCountry('');
+       markAsUpdated();
     }
   };
 
@@ -697,6 +782,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
           name: newCityName.trim()
       };
       onUpdatePoiCities([...poiCities, newCity]);
+      markAsUpdated();
       setSelectedCityId(newCity.id);
       setNewCityName('');
       setIsAddingCity(false);
@@ -710,6 +796,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
           onUpdatePoiHotels(poiHotels.filter(h => h.cityId !== id));
           onUpdatePoiActivities(poiActivities.filter(a => a.cityId !== id));
           if(selectedCityId === id) setSelectedCityId('');
+          markAsUpdated();
       }
   };
 
@@ -785,17 +872,22 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
       
       alert("合并完成！");
       if (citiesToRemove.has(selectedCityId)) setSelectedCityId('');
+      markAsUpdated();
   };
 
   // Generic Item Updates
   const updateItem = <T extends { id: string }>(items: T[], updater: (newItems: T[]) => void, id: string, diff: Partial<T>) => {
       if (isReadOnly) return;
-      updater(items.map(i => i.id === id ? { ...i, ...diff } : i));
+      // Force update timestamp
+      const timestampedDiff = { ...diff, lastUpdated: Date.now() };
+      updater(items.map(i => i.id === id ? { ...i, ...timestampedDiff } : i));
+      markAsUpdated();
   };
   const deleteItem = <T extends { id: string }>(items: T[], updater: (newItems: T[]) => void, id: string, itemName: string = '项目') => {
       if (isReadOnly) return;
       if (window.confirm(`确定删除此${itemName}数据吗？`)) {
           updater(items.filter(i => i.id !== id));
+          markAsUpdated();
       }
   };
 
@@ -807,9 +899,11 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
   // Hotel specific actions
   const updateHotelNameGroup = (oldName: string, newName: string) => {
       if (isReadOnly) return;
+      // When updating group name, we update all items in that group. Timestamp is also updated.
       onUpdatePoiHotels(poiHotels.map(h => 
-        (h.cityId === selectedCityId && (h.name || "未命名酒店") === oldName) ? { ...h, name: newName } : h
+        (h.cityId === selectedCityId && (h.name || "未命名酒店") === oldName) ? { ...h, name: newName, lastUpdated: Date.now() } : h
       ));
+      markAsUpdated();
   };
   const addRoomToHotel = (hotelName: string) => {
       if (isReadOnly) return;
@@ -818,9 +912,11 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
           cityId: selectedCityId,
           name: hotelName === "未命名酒店" ? "" : hotelName,
           roomType: '新房型',
-          price: 0
+          price: 0,
+          lastUpdated: Date.now()
       };
       onUpdatePoiHotels([...poiHotels, newRoom]);
+      markAsUpdated();
   };
   const addContentGroup = () => {
        if (isReadOnly) return;
@@ -829,29 +925,35 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
           cityId: selectedCityId,
           name: '新酒店',
           roomType: '标准间',
-          price: 0
+          price: 0,
+          lastUpdated: Date.now()
       };
       onUpdatePoiHotels([...poiHotels, newRoom]);
+      markAsUpdated();
   };
   const deleteHotelGroup = (hotelName: string) => {
       if (isReadOnly) return;
       if(window.confirm(`确定删除酒店 "${hotelName}" 及其所有房型数据吗?`)) {
           onUpdatePoiHotels(poiHotels.filter(h => !(h.cityId === selectedCityId && (h.name || "未命名酒店") === hotelName)));
+          markAsUpdated();
       }
   };
 
   // Other Add Actions
   const addCar = () => {
       if (isReadOnly) return;
-      onUpdateCarDB([...carDB, { id: generateUUID(), region: selectedCountry, carModel: '', serviceType: '包车', passengers: 4, priceLow: 0, priceHigh: 0 }]);
+      onUpdateCarDB([...carDB, { id: generateUUID(), region: selectedCountry, carModel: '', serviceType: '包车', passengers: 4, priceLow: 0, priceHigh: 0, lastUpdated: Date.now() }]);
+      markAsUpdated();
   }
   const addSpot = () => {
       if (isReadOnly) return;
-      onUpdatePoiSpots([...poiSpots, { id: generateUUID(), cityId: selectedCityId, name: '', price: 0 }]);
+      onUpdatePoiSpots([...poiSpots, { id: generateUUID(), cityId: selectedCityId, name: '', price: 0, lastUpdated: Date.now() }]);
+      markAsUpdated();
   }
   const addActivity = () => {
       if (isReadOnly) return;
-      onUpdatePoiActivities([...poiActivities, { id: generateUUID(), cityId: selectedCityId, name: '', price: 0 }]);
+      onUpdatePoiActivities([...poiActivities, { id: generateUUID(), cityId: selectedCityId, name: '', price: 0, lastUpdated: Date.now() }]);
+      markAsUpdated();
   }
 
   // Sidebar List
@@ -889,11 +991,6 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
             ) : (
                 <div className="p-4 text-center">
                     <p className="text-xs text-gray-400 mb-4">暂无数据</p>
-                    {!isReadOnly && (
-                        <button onClick={handleRestoreDefaults} className="px-3 py-2 bg-blue-50 text-blue-600 text-xs rounded border border-blue-200 hover:bg-blue-100">
-                            初始化演示数据
-                        </button>
-                    )}
                 </div>
             )}
           </div>
@@ -906,7 +1003,6 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                 <button onClick={handleExportDatabase} className="w-full py-1.5 text-xs text-blue-700 border border-blue-200 bg-blue-50 rounded hover:bg-blue-100 flex justify-center items-center gap-1">
                     <Download size={12}/> 导出 Excel
                 </button>
-                <button onClick={handleRestoreDefaults} className="w-full py-1.5 text-xs text-red-600 border border-red-200 bg-red-50 rounded hover:bg-red-100 flex justify-center items-center gap-1"><RotateCcw size={12}/> 重置/恢复默认</button>
                 {isAddingCountry ? (
                 <div className="flex items-center gap-1">
                     <input autoFocus type="text" className="w-full text-xs border border-blue-300 rounded px-1 py-1" placeholder="新国家名称" value={newCountryName} onChange={(e) => setNewCountryName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddCountry()} />
@@ -955,32 +1051,36 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                     "服务": "支持: Service, Type...",
                                     "顾客数": "支持: Pax, Capacity...",
                                     "淡季价格": "支持: Low Season, Off...",
-                                    "旺季价格": "支持: High Season, Peak..."
+                                    "旺季价格": "支持: High Season, Peak...",
+                                    "备注": "支持: Desc, Note..."
                                 }}
                             />
 
-                            <div className="bg-white border rounded-lg shadow-sm mb-8">
+                            <div className="bg-white border rounded-lg shadow-sm mb-8 overflow-auto">
                                 <table className="min-w-full divide-y divide-gray-200">
                                     <thead className="bg-gray-50">
                                         <tr>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">车型 (可空白)</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">服务 (包车/拼车/等)</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">顾客数</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-blue-600 uppercase">淡季价格</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase">旺季价格</th>
+                                            {ResizableTh('t_model', '车型 (可空白)')}
+                                            {ResizableTh('t_service', '服务 (包车/拼车/等)')}
+                                            {ResizableTh('t_pax', '顾客数')}
+                                            {ResizableTh('t_priceLow', '淡季价格', 'text-blue-600')}
+                                            {ResizableTh('t_priceHigh', '旺季价格', 'text-red-600')}
+                                            {ResizableTh('t_desc', '备注')}
+                                            {ResizableTh('t_updated', '更新', 'text-gray-400')}
                                             <th className="w-16"></th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-200">
                                         {currentCars.map(row => (
                                             <tr key={row.id}>
-                                                <td className="px-6 py-2"><input disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={row.carModel} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { carModel: e.target.value })} placeholder="车型" /></td>
-                                                <td className="px-6 py-2">
+                                                <td className="px-4 py-2"><input onKeyDown={handleEnter} disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={row.carModel} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { carModel: e.target.value })} placeholder="车型" /></td>
+                                                <td className="px-4 py-2">
                                                     <select 
                                                         disabled={isReadOnly}
                                                         className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" 
                                                         value={row.serviceType} 
                                                         onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { serviceType: e.target.value })} 
+                                                        onKeyDown={handleEnter}
                                                     >
                                                         <option value="包车">包车</option>
                                                         <option value="城际">城际</option>
@@ -989,10 +1089,28 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                         <option value="其它">其它</option>
                                                     </select>
                                                 </td>
-                                                <td className="px-6 py-2"><input disabled={isReadOnly} type="number" min="1" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={row.passengers} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { passengers: parseFloat(e.target.value) || 0 })} /></td>
-                                                <td className="px-6 py-2"><input disabled={isReadOnly} type="number" className="w-full text-sm border-gray-300 rounded text-blue-600 disabled:bg-gray-50 disabled:text-gray-500" value={row.priceLow} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { priceLow: parseFloat(e.target.value) || 0 })} /></td>
-                                                <td className="px-6 py-2"><input disabled={isReadOnly} type="number" className="w-full text-sm border-gray-300 rounded text-red-600 disabled:bg-gray-50 disabled:text-gray-500" value={row.priceHigh} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { priceHigh: parseFloat(e.target.value) || 0 })} /></td>
-                                                <td className="px-6 text-center">{!isReadOnly && <button onClick={() => deleteItem(carDB, onUpdateCarDB, row.id, '车型配置')}><Trash2 size={16} className="text-gray-300 hover:text-red-500"/></button>}</td>
+                                                <td className="px-4 py-2"><input onKeyDown={handleEnter} disabled={isReadOnly} type="number" min="1" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={row.passengers} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { passengers: parseFloat(e.target.value) || 0 })} /></td>
+                                                <td className="px-4 py-2">
+                                                    {isReadOnly ? (
+                                                        <span className="text-sm font-mono text-gray-600">{maskPrice(row.priceLow)}</span>
+                                                    ) : (
+                                                        <input onKeyDown={handleEnter} type="number" className="w-full text-sm border-gray-300 rounded text-blue-600" value={row.priceLow || ''} placeholder="0" onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { priceLow: parseFloat(e.target.value) || 0 })} />
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-2">
+                                                    {isReadOnly ? (
+                                                        <span className="text-sm font-mono text-gray-600">{maskPrice(row.priceHigh)}</span>
+                                                    ) : (
+                                                        <input onKeyDown={handleEnter} type="number" className="w-full text-sm border-gray-300 rounded text-red-600" value={row.priceHigh || ''} placeholder="0" onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { priceHigh: parseFloat(e.target.value) || 0 })} />
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-2">
+                                                    <input onKeyDown={handleEnter} disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={row.description || ''} onChange={(e) => updateItem<CarCostEntry>(carDB, onUpdateCarDB, row.id, { description: e.target.value })} placeholder="备注" />
+                                                </td>
+                                                <td className="px-4 py-2 text-xs text-gray-400">
+                                                    {formatDate(row.lastUpdated)}
+                                                </td>
+                                                <td className="px-4 text-center">{!isReadOnly && <button onClick={() => deleteItem(carDB, onUpdateCarDB, row.id, '车型配置')}><Trash2 size={16} className="text-gray-300 hover:text-red-500"/></button>}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -1069,6 +1187,7 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                     {currentCities.map(city => (
                                         <div key={city.id} onClick={() => setSelectedCityId(city.id)} className={`px-4 py-2 cursor-pointer text-sm flex justify-between items-center group ${selectedCityId === city.id ? 'bg-white text-blue-600 font-medium border-r-2 border-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}>
                                             <input 
+                                                onKeyDown={handleEnter}
                                                 disabled={isReadOnly}
                                                 type="text"
                                                 className={`w-full bg-transparent border-none focus:ring-0 p-0 text-sm cursor-pointer disabled:cursor-pointer disabled:text-gray-600 ${selectedCityId === city.id ? 'font-medium text-blue-600 placeholder-blue-400' : 'text-gray-600'}`}
@@ -1112,17 +1231,34 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                         "国家": "支持: Country...",
                                                         "城市": "支持: City, Location...",
                                                         "景点名称": "支持: Name, Spot, Scenic...",
-                                                        "价格": "支持: Price, Ticket..."
+                                                        "价格": "支持: Price, Ticket...",
+                                                        "备注": "支持: Desc, Note..."
                                                     }}
                                                 />
-                                                <div className="bg-white border rounded shadow-sm">
+                                                <div className="bg-white border rounded shadow-sm overflow-auto">
                                                     <table className="min-w-full divide-y divide-gray-200">
-                                                        <thead className="bg-gray-50"><tr><th className="px-4 py-2 text-left text-xs font-medium text-gray-500">景点名称</th><th className="px-4 py-2 text-left text-xs font-medium text-gray-500 w-32">门票单人价</th><th className="w-12"></th></tr></thead>
+                                                        <thead className="bg-gray-50"><tr>
+                                                            {ResizableTh('s_name', '景点名称')}
+                                                            {ResizableTh('s_price', '门票单人价')}
+                                                            {ResizableTh('s_desc', '备注')}
+                                                            {ResizableTh('s_updated', '更新', 'text-gray-400')}
+                                                            <th className="w-12"></th>
+                                                        </tr></thead>
                                                         <tbody className="divide-y divide-gray-200">
                                                             {currentSpots.map(item => (
                                                                 <tr key={item.id}>
-                                                                    <td className="px-4 py-2"><input disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.name} onChange={(e) => updateItem<PoiSpot>(poiSpots, onUpdatePoiSpots, item.id, { name: e.target.value })} placeholder="景点名称"/></td>
-                                                                    <td className="px-4 py-2"><input disabled={isReadOnly} type="number" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.price} onChange={(e) => updateItem<PoiSpot>(poiSpots, onUpdatePoiSpots, item.id, { price: parseFloat(e.target.value) || 0 })}/></td>
+                                                                    <td className="px-4 py-2"><input onKeyDown={handleEnter} disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.name} onChange={(e) => updateItem<PoiSpot>(poiSpots, onUpdatePoiSpots, item.id, { name: e.target.value })} placeholder="景点名称"/></td>
+                                                                    <td className="px-4 py-2">
+                                                                        {isReadOnly ? (
+                                                                            <span className="text-sm font-mono text-gray-600">{maskPrice(item.price)}</span>
+                                                                        ) : (
+                                                                            <input onKeyDown={handleEnter} type="number" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.price || ''} placeholder="0" onChange={(e) => updateItem<PoiSpot>(poiSpots, onUpdatePoiSpots, item.id, { price: parseFloat(e.target.value) || 0 })}/>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-4 py-2">
+                                                                        <input onKeyDown={handleEnter} disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.description || ''} onChange={(e) => updateItem<PoiSpot>(poiSpots, onUpdatePoiSpots, item.id, { description: e.target.value })} placeholder="备注"/>
+                                                                    </td>
+                                                                    <td className="px-4 py-2 text-xs text-gray-400">{formatDate(item.lastUpdated)}</td>
                                                                     <td className="px-4 text-center">{!isReadOnly && <button onClick={() => deleteItem(poiSpots, onUpdatePoiSpots, item.id, '景点')}><Trash2 size={14} className="text-gray-300 hover:text-red-500"/></button>}</td>
                                                                 </tr>
                                                             ))}
@@ -1142,55 +1278,74 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                         "城市": "支持: City, Location...",
                                                         "酒店名称": "支持: Name, Hotel...",
                                                         "房型": "支持: Room, Type, Bed...",
-                                                        "价格": "支持: Price, Cost..."
+                                                        "价格": "支持: Price, Cost...",
+                                                        "备注": "支持: Desc, Note..."
                                                     }}
                                                 />
-                                                <div className="bg-white border rounded shadow-sm">
+                                                <div className="bg-white border rounded shadow-sm overflow-auto">
                                                     <table className="min-w-full divide-y divide-gray-200">
                                                         <thead className="bg-gray-50">
                                                           <tr>
-                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 w-1/4">酒店名称</th>
-                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">房型及价格</th>
+                                                            {ResizableTh('h_name', '酒店名称')}
+                                                            {ResizableTh('h_details', '房型及价格 (含备注)')}
                                                             <th className="w-12"></th>
                                                           </tr>
                                                         </thead>
                                                         <tbody className="divide-y divide-gray-200">
                                                             {groupedHotels.map(([hotelName, rows]) => (
-                                                                <tr key={hotelName}>
+                                                                <tr key={rows[0].id}>
                                                                     <td className="px-4 py-2 align-top">
-                                                                       <div className="flex items-center gap-2">
+                                                                       <div className="flex flex-col gap-1">
                                                                            <input 
+                                                                             onKeyDown={handleEnter}
                                                                              disabled={isReadOnly}
                                                                              className="w-full text-sm font-medium border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" 
                                                                              value={hotelName === "未命名酒店" ? "" : hotelName} 
                                                                              onChange={(e) => updateHotelNameGroup(hotelName, e.target.value)} 
                                                                              placeholder="酒店名称"
                                                                            />
+                                                                           <span className="text-[10px] text-gray-400">
+                                                                               更新: {formatDate(Math.max(...rows.map(r => r.lastUpdated || 0)))}
+                                                                           </span>
                                                                        </div>
                                                                     </td>
                                                                     <td className="px-4 py-2">
-                                                                       <div className="flex flex-wrap gap-2">
+                                                                       <div className="flex flex-col gap-2">
                                                                           {rows.map(item => (
-                                                                             <div key={item.id} className="flex items-center bg-blue-50 border border-blue-100 rounded px-2 py-1 gap-2">
+                                                                             <div key={item.id} className="flex items-center bg-blue-50 border border-blue-100 rounded px-2 py-1 gap-2 flex-wrap">
                                                                                 <input 
+                                                                                  onKeyDown={handleEnter}
                                                                                   disabled={isReadOnly}
-                                                                                  className="w-20 text-xs bg-transparent border-0 border-b border-blue-200 focus:ring-0 p-0 text-gray-700 disabled:border-transparent" 
+                                                                                  className="w-24 text-xs bg-transparent border-0 border-b border-blue-200 focus:ring-0 p-0 text-gray-700 disabled:border-transparent" 
                                                                                   value={item.roomType} 
                                                                                   onChange={(e) => updateItem<PoiHotel>(poiHotels, onUpdatePoiHotels, item.id, { roomType: e.target.value })} 
                                                                                   placeholder="房型"
                                                                                 />
                                                                                 <span className="text-gray-400 text-xs">:</span>
+                                                                                {isReadOnly ? (
+                                                                                    <span className="w-14 text-xs font-medium text-blue-700">{maskPrice(item.price)}</span>
+                                                                                ) : (
+                                                                                    <input 
+                                                                                      onKeyDown={handleEnter}
+                                                                                      type="number"
+                                                                                      className="w-14 text-xs bg-transparent border-0 border-b border-blue-200 focus:ring-0 p-0 font-medium text-blue-700 disabled:border-transparent disabled:text-gray-500" 
+                                                                                      value={item.price || ''}
+                                                                                      placeholder="0" 
+                                                                                      onChange={(e) => updateItem<PoiHotel>(poiHotels, onUpdatePoiHotels, item.id, { price: parseFloat(e.target.value) || 0 })} 
+                                                                                    />
+                                                                                )}
                                                                                 <input 
-                                                                                  disabled={isReadOnly}
-                                                                                  type="number"
-                                                                                  className="w-14 text-xs bg-transparent border-0 border-b border-blue-200 focus:ring-0 p-0 font-medium text-blue-700 disabled:border-transparent disabled:text-gray-500" 
-                                                                                  value={item.price} 
-                                                                                  onChange={(e) => updateItem<PoiHotel>(poiHotels, onUpdatePoiHotels, item.id, { price: parseFloat(e.target.value) || 0 })} 
+                                                                                    onKeyDown={handleEnter}
+                                                                                    disabled={isReadOnly}
+                                                                                    className="flex-1 min-w-[150px] text-xs bg-transparent border-0 border-b border-gray-300 focus:ring-0 p-0 text-gray-500 disabled:border-transparent placeholder-gray-300"
+                                                                                    value={item.description || ''}
+                                                                                    onChange={(e) => updateItem<PoiHotel>(poiHotels, onUpdatePoiHotels, item.id, { description: e.target.value })}
+                                                                                    placeholder="备注"
                                                                                 />
                                                                                 {!isReadOnly && <button onClick={() => deleteItem(poiHotels, onUpdatePoiHotels, item.id, '房型')} className="text-blue-300 hover:text-red-500 ml-1"><X size={12}/></button>}
                                                                              </div>
                                                                           ))}
-                                                                          {!isReadOnly && <button onClick={() => addRoomToHotel(hotelName)} className="px-2 py-1 text-xs border border-dashed border-gray-300 rounded text-gray-500 hover:text-blue-600 hover:border-blue-400 transition-colors">+ 房型</button>}
+                                                                          {!isReadOnly && <button onClick={() => addRoomToHotel(hotelName)} className="w-20 px-2 py-1 text-xs border border-dashed border-gray-300 rounded text-gray-500 hover:text-blue-600 hover:border-blue-400 transition-colors">+ 房型</button>}
                                                                        </div>
                                                                     </td>
                                                                     <td className="px-4 text-center align-middle">
@@ -1213,17 +1368,34 @@ export const ResourceDatabase: React.FC<ResourceDatabaseProps> = ({
                                                         "国家": "支持: Country...",
                                                         "城市": "支持: City, Location...",
                                                         "活动名称": "支持: Name, Activity...",
-                                                        "价格": "支持: Price, Cost..."
+                                                        "价格": "支持: Price, Cost...",
+                                                        "备注": "支持: Desc, Note..."
                                                     }}
                                                 />
-                                                <div className="bg-white border rounded shadow-sm">
+                                                <div className="bg-white border rounded shadow-sm overflow-auto">
                                                     <table className="min-w-full divide-y divide-gray-200">
-                                                        <thead className="bg-gray-50"><tr><th className="px-4 py-2 text-left text-xs font-medium text-gray-500">活动名称</th><th className="px-4 py-2 text-left text-xs font-medium text-gray-500 w-32">价格</th><th className="w-12"></th></tr></thead>
+                                                        <thead className="bg-gray-50"><tr>
+                                                            {ResizableTh('a_name', '活动名称')}
+                                                            {ResizableTh('a_price', '价格')}
+                                                            {ResizableTh('a_desc', '备注')}
+                                                            {ResizableTh('a_updated', '更新', 'text-gray-400')}
+                                                            <th className="w-12"></th>
+                                                        </tr></thead>
                                                         <tbody className="divide-y divide-gray-200">
                                                             {currentActivities.map(item => (
                                                                 <tr key={item.id}>
-                                                                    <td className="px-4 py-2"><input disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.name} onChange={(e) => updateItem<PoiActivity>(poiActivities, onUpdatePoiActivities, item.id, { name: e.target.value })} placeholder="活动名称"/></td>
-                                                                    <td className="px-4 py-2"><input disabled={isReadOnly} type="number" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.price} onChange={(e) => updateItem<PoiActivity>(poiActivities, onUpdatePoiActivities, item.id, { price: parseFloat(e.target.value) || 0 })}/></td>
+                                                                    <td className="px-4 py-2"><input onKeyDown={handleEnter} disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.name} onChange={(e) => updateItem<PoiActivity>(poiActivities, onUpdatePoiActivities, item.id, { name: e.target.value })} placeholder="活动名称"/></td>
+                                                                    <td className="px-4 py-2">
+                                                                        {isReadOnly ? (
+                                                                            <span className="text-sm font-mono text-gray-600">{maskPrice(item.price)}</span>
+                                                                        ) : (
+                                                                            <input onKeyDown={handleEnter} type="number" className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.price || ''} placeholder="0" onChange={(e) => updateItem<PoiActivity>(poiActivities, onUpdatePoiActivities, item.id, { price: parseFloat(e.target.value) || 0 })}/>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-4 py-2">
+                                                                        <input onKeyDown={handleEnter} disabled={isReadOnly} className="w-full text-sm border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-500" value={item.description || ''} onChange={(e) => updateItem<PoiActivity>(poiActivities, onUpdatePoiActivities, item.id, { description: e.target.value })} placeholder="备注"/>
+                                                                    </td>
+                                                                    <td className="px-4 py-2 text-xs text-gray-400">{formatDate(item.lastUpdated)}</td>
                                                                     <td className="px-4 text-center">{!isReadOnly && <button onClick={() => deleteItem(poiActivities, onUpdatePoiActivities, item.id, '活动')}><Trash2 size={14} className="text-gray-300 hover:text-red-500"/></button>}</td>
                                                                 </tr>
                                                             ))}

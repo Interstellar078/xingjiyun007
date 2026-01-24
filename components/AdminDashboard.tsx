@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Users, Activity, Trash2, Search, ShieldAlert, HardDrive, Download, Upload, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
+import { X, Users, Activity, Trash2, Search, ShieldAlert, HardDrive, Download, Upload, AlertTriangle, CheckCircle, Loader2, UserCheck, Database, Clock, User as UserIcon, Settings as SettingsIcon, Save } from 'lucide-react';
 import { AuthService } from '../services/authService';
 import { StorageService } from '../services/storageService';
-import { User, AuditLog } from '../types';
+import { User, AuditLog, UserRole, ResourceMetadata } from '../types';
 
 interface AdminDashboardProps {
   currentUser: User;
@@ -16,6 +16,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   
+  // System Info State
+  const [resourceMeta, setResourceMeta] = useState<ResourceMetadata | null>(null);
+  const [systemConfig, setSystemConfig] = useState<{ defaultMargin: number }>({ defaultMargin: 20 });
+  const [configSaved, setConfigSaved] = useState(false);
+
   // Backup State
   const [isBackupLoading, setIsBackupLoading] = useState(false);
   const [backupStatus, setBackupStatus] = useState('');
@@ -30,6 +35,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
         setLogs(await AuthService.getLogs());
     } else if (activeTab === 'users') {
         setUsers(await AuthService.getUsers());
+    } else if (activeTab === 'system') {
+        setResourceMeta(await StorageService.getResourceMetadata());
+        setSystemConfig(await StorageService.getSystemConfig());
     }
   };
 
@@ -42,6 +50,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
               alert("删除失败：无法删除管理员或自身。");
           }
       }
+  };
+
+  const handleUpdateRole = async (username: string, newRole: UserRole) => {
+      if (username === 'admin') {
+          alert("无法修改超级管理员权限");
+          return;
+      }
+      if (window.confirm(`确定将用户 "${username}" 的权限修改为 "${newRole === 'admin' ? '管理员' : '普通用户'}" 吗?`)) {
+          const success = await AuthService.updateUserRole(username, newRole, currentUser);
+          if (success) {
+              refreshData();
+          } else {
+              alert("修改失败，请检查网络或权限。");
+          }
+      }
+  };
+
+  const handleSaveConfig = async () => {
+      await StorageService.saveSystemConfig(systemConfig);
+      setConfigSaved(true);
+      setTimeout(() => setConfigSaved(false), 2000);
   };
 
   const handleBackup = async () => {
@@ -221,7 +250,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                             {u.role === 'admin' ? (
-                                                <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">管理员</span>
+                                                <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs flex items-center w-fit gap-1"><ShieldAlert size={10}/> 管理员</span>
                                             ) : (
                                                 <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs">普通用户</span>
                                             )}
@@ -231,9 +260,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             {u.username !== 'admin' && (
-                                                <button onClick={() => handleDeleteUser(u.username)} className="text-red-600 hover:text-red-900 flex items-center justify-end gap-1 w-full">
-                                                    <Trash2 size={16}/> 删除
-                                                </button>
+                                                <div className="flex justify-end gap-2 items-center">
+                                                    {u.role !== 'admin' ? (
+                                                        <button 
+                                                            onClick={() => handleUpdateRole(u.username, 'admin')} 
+                                                            className="text-blue-600 hover:text-blue-900 flex items-center gap-1 text-xs px-2 py-1 hover:bg-blue-50 rounded transition-colors"
+                                                            title="提升为管理员"
+                                                        >
+                                                            <UserCheck size={14}/> 设为管理
+                                                        </button>
+                                                    ) : (
+                                                        <button 
+                                                            onClick={() => handleUpdateRole(u.username, 'user')} 
+                                                            className="text-orange-600 hover:text-orange-900 flex items-center gap-1 text-xs px-2 py-1 hover:bg-orange-50 rounded transition-colors"
+                                                            title="降级为普通用户"
+                                                        >
+                                                            <ShieldAlert size={14}/> 取消管理
+                                                        </button>
+                                                    )}
+                                                    <div className="w-px h-4 bg-gray-300"></div>
+                                                    <button 
+                                                        onClick={() => handleDeleteUser(u.username)} 
+                                                        className="text-red-600 hover:text-red-900 flex items-center gap-1 text-xs px-2 py-1 hover:bg-red-50 rounded transition-colors"
+                                                        title="删除用户"
+                                                    >
+                                                        <Trash2 size={14}/> 删除
+                                                    </button>
+                                                </div>
                                             )}
                                         </td>
                                     </tr>
@@ -245,12 +298,75 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
                     {activeTab === 'system' && (
                         <div className="max-w-3xl mx-auto py-8">
                             <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                                <HardDrive size={24} className="text-blue-600"/> 数据备份与恢复
+                                <HardDrive size={24} className="text-blue-600"/> 系统维护与配置
                             </h2>
                             
+                            {/* Resource Database Status */}
+                            <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                <div>
+                                    <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                                        <Database size={18} className="text-purple-600"/> 资源库状态
+                                    </h3>
+                                    <p className="text-sm text-gray-500 mt-1">云端资源数据库 (POI, 车型, 酒店等)</p>
+                                </div>
+                                <div className="flex flex-col md:flex-row gap-4">
+                                    <div className="flex items-center gap-2 bg-gray-50 px-4 py-2 rounded-lg border border-gray-100">
+                                        <Clock size={16} className="text-gray-400"/>
+                                        <div className="flex flex-col">
+                                            <span className="text-xs text-gray-400">最近更新</span>
+                                            <span className="text-sm font-medium text-gray-700">
+                                                {resourceMeta ? new Date(resourceMeta.lastUpdated).toLocaleString() : '暂无记录'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 bg-gray-50 px-4 py-2 rounded-lg border border-gray-100">
+                                        <UserIcon size={16} className="text-gray-400"/>
+                                        <div className="flex flex-col">
+                                            <span className="text-xs text-gray-400">更新人</span>
+                                            <span className="text-sm font-medium text-gray-700">
+                                                {resourceMeta?.updatedBy || '-'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Global Config Card */}
+                            <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-8">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                                        <SettingsIcon size={18} className="text-blue-600"/> 全局默认参数
+                                    </h3>
+                                    <button 
+                                        onClick={handleSaveConfig}
+                                        className={`px-3 py-1.5 rounded text-sm font-medium flex items-center gap-2 transition-colors ${configSaved ? 'bg-green-100 text-green-700' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                                    >
+                                        {configSaved ? <CheckCircle size={14}/> : <Save size={14}/>}
+                                        {configSaved ? '已保存' : '保存配置'}
+                                    </button>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">默认报价利润率 (%)</label>
+                                    <div className="flex items-center gap-4">
+                                        <input 
+                                            type="range" 
+                                            min="0" 
+                                            max="100" 
+                                            value={systemConfig.defaultMargin} 
+                                            onChange={(e) => setSystemConfig({...systemConfig, defaultMargin: parseInt(e.target.value)})}
+                                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                        />
+                                        <span className="text-lg font-bold text-blue-600 w-12 text-right">{systemConfig.defaultMargin}%</span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        说明：普通用户无法调节利润率，系统将强制使用此默认值进行报价计算。
+                                    </p>
+                                </div>
+                            </div>
+
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 {/* Backup Card */}
-                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 shadow-sm">
+                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 shadow-sm flex flex-col">
                                     <div className="flex items-center gap-3 mb-4">
                                         <div className="p-3 bg-blue-100 text-blue-600 rounded-full">
                                             <Download size={24}/>
@@ -260,7 +376,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
                                             <p className="text-sm text-gray-500">下载当前云端所有数据</p>
                                         </div>
                                     </div>
-                                    <p className="text-sm text-gray-600 mb-6 min-h-[40px]">
+                                    <p className="text-sm text-gray-600 mb-6 flex-1">
                                         将当前的行程库、资源库、用户配置等所有数据打包下载为 JSON 文件。建议在版本更新前执行。
                                     </p>
                                     <button 
@@ -274,7 +390,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
                                 </div>
 
                                 {/* Restore Card */}
-                                <div className="bg-orange-50 border border-orange-200 rounded-xl p-6 shadow-sm">
+                                <div className="bg-orange-50 border border-orange-200 rounded-xl p-6 shadow-sm flex flex-col">
                                     <div className="flex items-center gap-3 mb-4">
                                         <div className="p-3 bg-orange-100 text-orange-600 rounded-full">
                                             <Upload size={24}/>
@@ -284,7 +400,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onC
                                             <p className="text-sm text-gray-500">上传备份文件覆盖云端</p>
                                         </div>
                                     </div>
-                                    <p className="text-sm text-gray-600 mb-6 min-h-[40px]">
+                                    <p className="text-sm text-gray-600 mb-6">
                                         <AlertTriangle size={14} className="inline mr-1 text-orange-500"/>
                                         警告：此操作将使用备份文件中的数据<span className="font-bold text-red-600">覆盖</span>当前云端数据库。请谨慎操作。
                                     </p>

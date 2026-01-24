@@ -28,6 +28,37 @@ export const AuthService = {
         return await StorageService.getUserProfiles();
     },
 
+    updateUserRole: async (targetUsername: string, newRole: UserRole, operator: User): Promise<boolean> => {
+        if (operator.role !== 'admin') return false;
+        
+        const client = SupabaseManager.getClient();
+        if (!client) return false;
+
+        // 1. Get existing profile from app_data
+        // We interact with the DB profile because we cannot change another user's Auth metadata from the client side.
+        const { data } = await client
+            .from('app_data')
+            .select('value')
+            .eq('key', `user_profile_${targetUsername}`)
+            .single();
+        
+        if (!data || !data.value) return false;
+
+        const profile = data.value as User;
+        
+        // 2. Update role locally
+        const updatedProfile = { ...profile, role: newRole };
+        
+        // 3. Save back to DB
+        try {
+            await StorageService.saveUserProfile(updatedProfile);
+            return true;
+        } catch (e) {
+            console.error("Failed to update user role", e);
+            return false;
+        }
+    },
+
     register: async (username: string, password: string): Promise<{ success: boolean, message: string }> => {
         const client = SupabaseManager.getClient();
         if (!client) return { success: false, message: '未连接云端服务，请先配置 Supabase' };
@@ -125,22 +156,47 @@ export const AuthService = {
                 };
                 await StorageService.saveUserProfile(adminUser);
                 return { success: true, user: adminUser, message: '管理员账户初始化成功' };
+            } else if (signUpError) {
+                console.warn("Bootstrap failed (User likely exists but password mismatch):", signUpError.message);
             }
         }
         // -----------------------------
 
         if (error) {
             console.error("Login Error:", error);
-            if (error.message.includes('Invalid login credentials')) return { success: false, message: '用户名或密码错误' };
+            if (error.message.includes('Invalid login credentials')) {
+                return { success: false, message: '用户名或密码错误。注意：如果是刚注册，请检查 Supabase 后台是否关闭了邮箱验证 (Confirm Email)。' };
+            }
             if (error.message.includes('Email not confirmed')) return { success: false, message: '登录失败：邮箱未验证。请在 Supabase 后台 Authentication -> Providers -> Email 中关闭 "Confirm email" 选项。' };
             return { success: false, message: `登录失败: ${error.message}` };
         }
         
         if (data.user) {
+            const username = data.user.user_metadata.username || cleanUsername;
+            
+            // Fetch Role Priority: 
+            // 1. Check 'app_data' profile (Allow admins to change roles)
+            // 2. Fallback to Auth Metadata
+            let role: UserRole = (data.user.user_metadata.role as UserRole) || 'user';
+            
+            try {
+                const { data: profileData } = await client
+                    .from('app_data')
+                    .select('value')
+                    .eq('key', `user_profile_${username}`)
+                    .single();
+                
+                if (profileData && profileData.value && profileData.value.role) {
+                    role = profileData.value.role;
+                }
+            } catch (e) {
+                // Ignore error, keep auth metadata role
+            }
+
             const user: User = {
-                username: data.user.user_metadata.username || cleanUsername,
+                username,
                 password: '',
-                role: (data.user.user_metadata.role as UserRole) || 'user',
+                role,
                 createdAt: new Date(data.user.created_at).getTime()
             };
             
@@ -167,10 +223,29 @@ export const AuthService = {
 
         const { data: { session } } = await client.auth.getSession();
         if (session?.user) {
+            const username = session.user.user_metadata.username || session.user.email || 'User';
+            
+            // Fetch Role Priority: DB Profile > Auth Metadata
+            let role: UserRole = (session.user.user_metadata.role as UserRole) || 'user';
+            
+            try {
+                const { data } = await client
+                    .from('app_data')
+                    .select('value')
+                    .eq('key', `user_profile_${username}`)
+                    .single();
+                
+                if (data && data.value && data.value.role) {
+                    role = data.value.role;
+                }
+            } catch (e) {
+                // Ignore error
+            }
+
             return {
-                username: session.user.user_metadata.username || session.user.email || 'User',
+                username: username,
                 password: '',
-                role: (session.user.user_metadata.role as UserRole) || 'user',
+                role: role,
                 createdAt: new Date(session.user.created_at).getTime()
             };
         }
