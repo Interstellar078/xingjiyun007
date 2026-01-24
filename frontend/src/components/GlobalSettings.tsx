@@ -1,124 +1,127 @@
 
 import React from 'react';
 import { TripSettings } from '../types';
-import { Users, Calendar, Globe, Coins } from 'lucide-react';
+import { Users, Calendar, Globe, Sparkles } from 'lucide-react';
 import { MultiSelect } from './MultiSelect';
 
 interface GlobalSettingsProps {
   settings: TripSettings;
   updateSettings: (s: Partial<TripSettings>) => void;
   availableCountries: string[];
+  onAutoGenerate?: () => void;
+  validationErrors?: { destinations?: boolean; startDate?: boolean };
+  tripDays: number;
+  onTripDaysChange: (days: number) => void;
 }
 
-export const GlobalSettings: React.FC<GlobalSettingsProps> = ({ settings, updateSettings, availableCountries }) => {
+export const GlobalSettings: React.FC<GlobalSettingsProps> = ({ settings, updateSettings, availableCountries, onAutoGenerate, validationErrors, tripDays, onTripDaysChange }) => {
   return (
-    <div className="bg-white px-4 py-3 border-b border-gray-200 shadow-sm mb-0 flex items-center flex-wrap gap-4 no-print text-sm">
+    <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-4 no-print text-sm">
+
       {/* Planner Name */}
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1 text-gray-500 font-medium">
-          <Users size={14} />
-        </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <Users size={15} className="text-gray-400" />
         <input
           type="text"
           value={settings.plannerName}
           onChange={(e) => updateSettings({ plannerName: e.target.value })}
-          className="w-32 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs py-1 px-2 border placeholder:text-gray-400"
+          className="w-36 transition-all hover:border-blue-400 focus:w-48 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs py-1.5 px-3 border placeholder:text-gray-400 font-medium text-gray-700"
           placeholder="定制师/用户名"
-          title="定制师"
         />
       </div>
 
-      <div className="h-4 w-px bg-gray-200"></div>
+      <div className="h-5 w-px bg-gray-200 mx-1 flex-shrink-0"></div>
 
-      {/* Start Date */}
-      <div className="flex items-center gap-2">
-        <Calendar size={14} className="text-gray-500" />
+      {/* Date */}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <Calendar size={15} className="text-gray-400" />
         <input
           type="date"
           value={settings.startDate}
           onChange={(e) => updateSettings({ startDate: e.target.value })}
-          className="w-32 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs py-1 px-2 border"
-          title="出发日期"
+          className={`w-32 rounded-md shadow-sm text-xs py-1.5 px-2 border text-gray-600 font-mono ${validationErrors?.startDate ? 'border-red-500 ring-1 ring-red-200 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'}`}
         />
       </div>
 
-      <div className="h-4 w-px bg-gray-200"></div>
+      <div className="h-5 w-px bg-gray-200 mx-1 flex-shrink-0"></div>
 
-      {/* People & Rooms */}
-      <div className="flex items-center gap-2">
-        <div className="relative w-20">
+      {/* Duration */}
+      <div className="flex items-center gap-2 flex-shrink-0 bg-gray-50 p-1 rounded-lg border border-gray-200">
+        <div className="relative">
+          <select
+            value={tripDays}
+            onChange={(e) => onTripDaysChange(parseInt(e.target.value))}
+            className="block w-20 rounded border-0 bg-white ring-1 ring-gray-200 focus:ring-2 focus:ring-blue-500 text-xs py-1.5 pl-2 pr-6 text-center font-medium appearance-none cursor-pointer"
+          >
+            {Array.from({ length: 20 }).map((_, i) => (
+              <option key={i + 1} value={i + 1}>{i + 1} 天</option>
+            ))}
+          </select>
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+            <span className="text-[10px]">▼</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="h-5 w-px bg-gray-200 mx-1 flex-shrink-0"></div>
+
+      {/* People Group */}
+      <div className="flex items-center gap-2 flex-shrink-0 bg-gray-50 p-1 rounded-lg border border-gray-200">
+        <div className="relative w-16">
           <input
             type="number"
             min="1"
             value={settings.peopleCount}
             onChange={(e) => updateSettings({ peopleCount: parseInt(e.target.value) || 0 })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs py-1 px-2 border pr-6"
-            placeholder="人数"
-            title="人数"
+            className="block w-full rounded border-0 bg-white ring-1 ring-gray-200 focus:ring-2 focus:ring-blue-500 text-xs py-1 px-1.5 pr-5 text-center font-medium"
+            placeholder="0"
           />
-          <span className="absolute right-1.5 top-1.5 text-gray-400 text-[10px]">人</span>
+          <span className="absolute right-1.5 top-1 text-gray-400 text-[10px] pointer-events-none">人</span>
         </div>
-        <div className="relative w-20">
+        <div className="relative w-16">
           <input
             type="number"
             min="0"
             value={settings.roomCount}
             onChange={(e) => updateSettings({ roomCount: parseInt(e.target.value) || 0 })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs py-1 px-2 border pr-6"
-            placeholder="间"
-            title="房间数"
+            className="block w-full rounded border-0 bg-white ring-1 ring-gray-200 focus:ring-2 focus:ring-blue-500 text-xs py-1 px-1.5 pr-5 text-center font-medium"
+            placeholder="0"
           />
-          <span className="absolute right-1.5 top-1.5 text-gray-400 text-[10px]">间</span>
+          <span className="absolute right-1.5 top-1 text-gray-400 text-[10px] pointer-events-none">间</span>
         </div>
       </div>
 
-      <div className="h-4 w-px bg-gray-200"></div>
+      <div className="h-5 w-px bg-gray-200 mx-1 flex-shrink-0"></div>
 
-      {/* Currency & Destinations */}
+      {/* Destination - Flexible Width */}
       <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-        <Globe size={14} className="text-gray-500" />
+        {/* <Globe size={15} className="text-blue-500 flex-shrink-0" /> */}
         <div className="flex-1">
           <MultiSelect
             options={availableCountries}
             value={settings.destinations}
             onChange={(vals) => updateSettings({ destinations: vals })}
-            placeholder="目的地国家..."
+            placeholder="选择目的地国家..."
             className="w-full text-xs"
+            variant="bordered"
+            isError={validationErrors?.destinations}
           />
         </div>
       </div>
 
-      <div className="h-4 w-px bg-gray-200"></div>
+      <div className="flex-1"></div>
 
-      {/* Currency Rate */}
-      <div className="flex items-center gap-2">
-        <Coins size={14} className="text-gray-500" />
-        <input
-          type="text"
-          value={settings.currency}
-          onChange={(e) => {
-            const val = e.target.value;
-            const isCNY = val.toUpperCase() === 'CNY' || val === '人民币';
-            updateSettings({
-              currency: val,
-              exchangeRate: isCNY ? 1 : settings.exchangeRate
-            })
-          }}
-          className="w-16 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs py-1 px-2 border text-center"
-          placeholder="货币"
-          title="货币单位"
-        />
-        <input
-          type="number"
-          step="0.01"
-          disabled={settings.currency.toUpperCase() === 'CNY' || settings.currency === '人民币'}
-          value={settings.exchangeRate}
-          onChange={(e) => updateSettings({ exchangeRate: parseFloat(e.target.value) || 1 })}
-          className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs py-1 px-2 border disabled:bg-gray-50 text-right"
-          placeholder="汇率"
-          title="对人民币汇率"
-        />
-      </div>
+      {/* AI Auto Generate Button */}
+      {onAutoGenerate && (
+        <button
+          onClick={onAutoGenerate}
+          className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-md text-xs font-medium hover:opacity-90 shadow-sm transition-all active:scale-95 flex-shrink-0"
+        >
+          <div className="animate-pulse"><Sparkles size={14} /></div>
+          AI 一键定制
+        </button>
+      )}
+
     </div>
   );
 };

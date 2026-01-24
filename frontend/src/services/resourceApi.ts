@@ -102,5 +102,17 @@ export const resourceApi = {
     },
     createTransport: (data: Partial<CarCostEntry>) => fetchJson(`${API_BASE}/transports`, { method: 'POST', body: JSON.stringify(data) }),
     updateTransport: (id: string, data: Partial<CarCostEntry>) => fetchJson(`${API_BASE}/transports/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    // ... (existing exports)
     deleteTransport: (id: string) => fetchJson(`${API_BASE}/transports/${id}`, { method: 'DELETE' }),
+};
+
+export const aiApi = {
+    generateItinerary: (payload: {
+        currentDestinations: string[];
+        currentDays: number;
+        availableCountries: string[];
+        userPrompt?: string;
+        currentRows?: any[];
+        historyTrips?: any[];
+    }) => fetchJson('/api/ai/itinerary', { method: 'POST', body: JSON.stringify(payload) }),
 };

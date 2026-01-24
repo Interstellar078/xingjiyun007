@@ -18,7 +18,16 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field("HS256", alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(60 * 24, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
 
+    # LLM Configuration
+    llm_provider: str = Field("gemini", alias="LLM_PROVIDER") # "gemini" or "openai"
+
     gemini_api_key: str | None = Field(None, alias="GEMINI_API_KEY")
+    gemini_base_url: str | None = Field(None, alias="GEMINI_BASE_URL")
+    gemini_model_name: str = Field("gemini-1.5-flash", alias="GEMINI_MODEL")
+
+    openai_api_key: str | None = Field(None, alias="OPENAI_API_KEY")
+    openai_base_url: str | None = Field(None, alias="OPENAI_BASE_URL")
+    openai_model_name: str = Field("gpt-3.5-turbo", alias="OPENAI_MODEL")
 
     cors_origins: str = Field("", alias="CORS_ORIGINS")
     log_level: str = Field("INFO", alias="LOG_LEVEL")

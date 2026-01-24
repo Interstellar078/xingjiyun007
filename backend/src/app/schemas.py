@@ -74,3 +74,4 @@ class ItineraryResponse(BaseModel):
     detectedDestinations: list[str]
     itinerary: list[dict]
     reasoning: str | None = None
+    error: str | None = None

@@ -8,6 +8,10 @@ def configure_logging(level: str = "INFO", json_format: bool = False) -> None:
     level = (level or "INFO").upper()
     formatter = "json" if json_format else "standard"
 
+    import os
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+    
     config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -31,7 +35,7 @@ def configure_logging(level: str = "INFO", json_format: bool = False) -> None:
             },
             "file": {
                 "class": "logging.handlers.TimedRotatingFileHandler",
-                "filename": "app.log",
+                "filename": os.path.join(log_dir, "app.log"),
                 "when": "midnight",
                 "interval": 1,
                 "backupCount": 30,
