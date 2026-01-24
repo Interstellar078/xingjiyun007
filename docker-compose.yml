@@ -1,0 +1,28 @@
+services:
+  # Frontend Service (Nginx + Static Files)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: always
+
+  # Backend Service (FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./db/app.db} # Default to local sqlite for simplicity if not set
+      - JWT_SECRET=${JWT_SECRET:-changethisstoproductionsecret}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CORS_ORIGINS=*
+    volumes:
+      - ./backend/db:/app/db # Persist SQLite DB
+      - ./backend/logs:/app/logs # Persist Logs
+    restart: always
+
+# Define networks if needed, but default is fine for this scale
