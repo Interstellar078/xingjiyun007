@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, Lock, Mail, Eye, EyeOff, X, ArrowRight, Loader2 } from 'lucide-react';
 import { AuthService } from '../services/authService';
 import { User as UserType } from '../types';
+import { setAuthToken } from '../services/apiClient';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -79,10 +80,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
       } else {
         const result = await AuthService.register(username, password);
         if (result.success && result.user && result.token) {
-          // Auto login
-          import('../services/apiClient').then(({ setAuthToken }) => {
-            setAuthToken(result.token || null);
-          });
+          setAuthToken(result.token);
           onLoginSuccess(result.user);
           onClose();
         } else {

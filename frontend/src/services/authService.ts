@@ -21,6 +21,9 @@ export const AuthService = {
                 username,
                 password
             });
+            if (result.success && result.token) {
+                setAuthToken(result.token);
+            }
             return {
                 success: result.success,
                 message: result.message,
