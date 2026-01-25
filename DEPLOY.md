@@ -65,6 +65,10 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/travel_builder
 docker compose up -d --build
 ```
 
+**日志挂载说明（推荐）**
+- 后端日志使用 Docker 命名卷 `backend_logs`（容器内 `/app/logs`）
+- 无需手动创建宿主机目录
+
 - `-d`: 后台运行
 - `--build`: 强制构建镜像（确保代码更新后生效）
 

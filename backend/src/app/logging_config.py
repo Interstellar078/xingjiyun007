@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import logging
 import logging.config
+import os
 
 
 def configure_logging(level: str = "INFO", json_format: bool = False) -> None:
     level = (level or "INFO").upper()
     formatter = "json" if json_format else "standard"
 
-    import os
     log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except OSError:
+        log_dir = "/tmp"
     
     config = {
         "version": 1,
@@ -58,4 +61,22 @@ def configure_logging(level: str = "INFO", json_format: bool = False) -> None:
         },
     }
 
-    logging.config.dictConfig(config)
+    try:
+        logging.config.dictConfig(config)
+    except Exception:
+        # Fallback to console-only logging if file handler cannot be initialized.
+        fallback = {
+            **config,
+            "handlers": {"console": config["handlers"]["console"]},
+            "root": {"handlers": ["console"], "level": level},
+            "loggers": {
+                "uvicorn": {"handlers": ["console"], "level": level, "propagate": False},
+                "uvicorn.error": {"handlers": ["console"], "level": level, "propagate": False},
+                "uvicorn.access": {
+                    "handlers": ["console"],
+                    "level": "INFO" if level != "DEBUG" else "DEBUG",
+                    "propagate": False,
+                },
+            },
+        }
+        logging.config.dictConfig(fallback)

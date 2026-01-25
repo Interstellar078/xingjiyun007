@@ -22,6 +22,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    user: "${UID:-1000}:${GID:-1000}"
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/travel_builder}
       - JWT_SECRET=${JWT_SECRET}
@@ -35,7 +36,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_JSON=${LOG_JSON:-false}
     volumes:
-      - ./backend/logs:/app/logs
+      - backend_logs:/app/logs
     depends_on:
       - db
     restart: unless-stopped
@@ -55,3 +56,4 @@ services:
 
 volumes:
   postgres_data:
+  backend_logs:
