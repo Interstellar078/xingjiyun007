@@ -12,9 +12,9 @@
    pip install -e .
    ```
 
-2. Set environment variables by copying `.env.example` to `.env` and editing values:
+2. Set environment variables by copying the project root `.env.example` to `.env` and editing values:
    ```bash
-   cp .env.example .env
+   cp ../.env.example .env
    ```
    Example `.env`:
    ```

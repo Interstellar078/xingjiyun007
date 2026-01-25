@@ -22,7 +22,7 @@
 1. 进入后端目录：`cd backend`
 2. 创建并激活虚拟环境：\n`python -m venv .venv && source .venv/bin/activate`
 3. 安装依赖：`pip install -e .`
-4. 配置环境变量（示例见 `backend/.env.example`）：\n`DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/travel_builder`\n`JWT_SECRET=change-me`\n`GEMINI_API_KEY=...` (可选)\n5. 启动后端：`uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+4. 配置环境变量（示例见 `.env.example`）：\n`DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/travel_builder`\n`JWT_SECRET=change-me`\n`GEMINI_API_KEY=...` (可选)\n5. 启动后端：`uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 
 ## Notes
 

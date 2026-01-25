@@ -61,4 +61,4 @@ server {
 
 ## Notes
 - The frontend expects the FastAPI backend to be running.
-- Copy `.env.example` into `.env.local` and adjust as needed.
+- Create `frontend/.env.local` (参考项目根目录 `.env.example` 中的 `VITE_API_BASE_URL`).
