@@ -36,7 +36,8 @@ class Settings(BaseSettings):
     model_config = {
         "case_sensitive": False,
         "populate_by_name": True,
-        "env_file": ".env",
+        # Search for .env in current dir (backend) or project root (../../)
+        "env_file": [".env", "../../.env"],
         "env_file_encoding": "utf-8",
     }
 

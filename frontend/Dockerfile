@@ -3,8 +3,16 @@ FROM node:20-alpine as build
 
 WORKDIR /app
 
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
 COPY package.json package-lock.json* ./
-RUN npm install
+# Use China Mirror for faster install
+RUN npm config set registry https://registry.npmmirror.com
+# Optional: Use Alpine Mirror
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
+RUN npm ci
 
 COPY . .
 RUN npm run build

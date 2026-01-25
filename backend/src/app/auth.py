@@ -13,6 +13,10 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 settings = get_settings()
 
 
+def _password_too_long(password: str) -> bool:
+    return len(password.encode("utf-8")) > 72
+
+
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 

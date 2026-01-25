@@ -1,29 +1,31 @@
 
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional, TypedDict, List
 import json
 import logging
 from sqlalchemy.orm import Session
 from ..config import get_settings
 
 # LangChain Imports
-from langchain_core.tools import tool
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import create_tool_calling_agent
-from langchain.agents.agent import AgentExecutor # Fix import
-from langchain.agents.format_scratchpad.openai_tools import (
-    format_to_openai_tool_messages,
-)
-from langchain.agents.output_parsers.openai_tools import (
-    OpenAIToolsAgentOutputParser,
-)
+from langgraph.graph import StateGraph, END
+from pydantic import TypeAdapter, ValidationError
+from ..schemas import ItineraryItem
 
 logger = logging.getLogger(__name__)
 
+class AgentState(TypedDict):
+    req: Any
+    hotels: List[Dict[str, Any]]
+    spots: List[Dict[str, Any]]
+    itinerary: List[Dict[str, Any]]
+    error: Optional[str]
+
 class AIAgentService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user: Optional[Any] = None):
         self.db = db
+        self.user = user
         self.settings = get_settings()
         self.llm = None
         self._configure_llm()
@@ -58,22 +60,39 @@ class AIAgentService:
         
         if not self.llm:
             logger.error(f"Failed to configure LLM. self.llm is None. Settings: provider={provider}, openai_key_set={bool(self.settings.openai_api_key)}")
+
+    def search_hotels(self, city_name: str, price_max: Optional[int] = None) -> str:
+        return self._search_hotels_tool(city_name, price_max)
+
+    def search_spots(self, city_name: str) -> str:
+        return self._search_spots_tool(city_name)
     
     # --- Defined Tools ---
     # We define tools dynamically to bind self.db implicitly or pass db explicitly
     # But @tool decorator works best on static functions or we use StructuredTool.from_function.
     # To access 'self', we'll define methods and wrap them.
 
-    def _search_hotels_tool(self, city_name: str, price_max: Optional[int] = None) -> str:
+    def _fetch_hotels(self, city_name: str, price_max: Optional[int] = None) -> List[Dict[str, Any]]:
         """Search for hotels in the database by city name."""
-        from sqlalchemy import select
+        from sqlalchemy import select, or_
         from ..models import ResourceHotel, ResourceCity
         
+        user = self.user
+        if not user:
+            return []
+
         # Join Hotel -> City on city_id = id
         stmt = (
             select(ResourceHotel)
             .join(ResourceCity, ResourceHotel.city_id == ResourceCity.id)
-            .where(ResourceCity.name.ilike(f"%{city_name}%"))
+            .where(
+                ResourceCity.name.ilike(f"%{city_name}%"),
+                or_(
+                    ResourceHotel.is_public == True,
+                    ResourceHotel.owner_id == user.username,
+                ),
+            )
+            .order_by(ResourceHotel.price.asc().nulls_last())
         )
         results = self.db.execute(stmt).scalars().all()
         
@@ -82,57 +101,75 @@ class AIAgentService:
             price = h.price or 0
             if price_max and price > price_max:
                 continue
-            # Note: h.rating is not in the model definition you showed, but I'll leave it out or check safely?
-            # Model says: id, city_id, name, room_type, price, owner_id, is_public. NO RATING.
-            filtered.append(f"ID: {h.id}, Name: {h.name}, Price: {price}, Type: {h.room_type or 'N/A'}")
+            filtered.append(
+                {
+                    "name": h.name,
+                    "price": price,
+                    "room_type": h.room_type or "N/A",
+                }
+            )
         
-        return json.dumps(filtered[:5], ensure_ascii=False) if filtered else f"No hotels found in {city_name}."
+        return filtered[:5]
 
-    def _search_spots_tool(self, city_name: str) -> str:
+    def _fetch_spots(self, city_name: str) -> List[Dict[str, Any]]:
         """Search for scenic spots/attractions in the database by city name."""
-        from sqlalchemy import select
+        from sqlalchemy import select, or_
         from ..models import ResourceSpot, ResourceCity
         
+        user = self.user
+        if not user:
+            return []
+
         stmt = (
             select(ResourceSpot)
             .join(ResourceCity, ResourceSpot.city_id == ResourceCity.id)
-            .where(ResourceCity.name.ilike(f"%{city_name}%"))
+            .where(
+                ResourceCity.name.ilike(f"%{city_name}%"),
+                or_(
+                    ResourceSpot.is_public == True,
+                    ResourceSpot.owner_id == user.username,
+                ),
+            )
+            .order_by(ResourceSpot.price.asc().nulls_last())
         )
         results = self.db.execute(stmt).scalars().all()
         
         # Model for Spot: id, city_id, name, price, owner_id, is_public.
         # No suggested_hours in the model shown (ResourceSpot). It was in previous logs/assumptions.
-        filtered = [f"ID: {s.id}, Name: {s.name}, Price: {s.price or 0}" for s in results]
-        return json.dumps(filtered[:8], ensure_ascii=False) if filtered else f"No spots found in {city_name}."
+        return [{"name": s.name, "price": s.price or 0} for s in results][:8]
+
+    def _search_hotels_tool(self, city_name: str, price_max: Optional[int] = None) -> str:
+        hotels = self._fetch_hotels(city_name, price_max)
+        return json.dumps(hotels, ensure_ascii=False) if hotels else f"No hotels found in {city_name}."
+
+    def _search_spots_tool(self, city_name: str) -> str:
+        spots = self._fetch_spots(city_name)
+        return json.dumps(spots, ensure_ascii=False) if spots else f"No spots found in {city_name}."
 
     def generate_itinerary_with_react(self, req: Any) -> Dict[str, Any]:
         if not self.llm:
             return {"error": "LLM not configured (LangChain)"}
             
-        # 1. Prepare Tools
-        from langchain.tools import StructuredTool
-        
-        tools = [
-            StructuredTool.from_function(
-                func=self._search_hotels_tool,
-                name="search_hotels",
-                description="Search keys: city_name (str), price_max (int, optional). Returns list of hotels."
-            ),
-            StructuredTool.from_function(
-                func=self._search_spots_tool,
-                name="search_spots",
-                description="Search keys: city_name (str). Returns list of spots/attractions."
-            )
-        ]
-
-        # 2. Prepare Prompt
         city = req.currentDestinations[0] if req.currentDestinations else "Unknown"
         days = req.currentDays
-        
-        system_prompt = f"""你是一位专业的行程规划师。
+        available_countries = ", ".join(req.availableCountries or [])
+
+        def fetch_resources(state: AgentState) -> AgentState:
+            hotels = self._fetch_hotels(city)
+            spots = self._fetch_spots(city)
+            return {**state, "hotels": hotels, "spots": spots}
+
+        def generate_plan(state: AgentState) -> AgentState:
+            hotels_json = json.dumps(state["hotels"], ensure_ascii=False)
+            spots_json = json.dumps(state["spots"], ensure_ascii=False)
+            system_prompt = f"""你是一位专业的行程规划师。
 你的目标是规划一个前往 {city} 的 {days} 天行程。
 你必须严格遵守以下 JSON 格式返回结果，**所有文本内容（如路线、描述、景点名称）必须使用简体中文**。
 请不要使用 markdown 代码块包裹 JSON，尽量直接返回原始 JSON 字符串。
+如果提供了可用国家列表，请优先在这些国家范围内规划：{available_countries or "未提供"}。
+
+可用酒店资源（JSON 数组，供参考）：{hotels_json}
+可用景点资源（JSON 数组，供参考）：{spots_json}
 
 Required JSON Structure:
 {{{{
@@ -155,85 +192,62 @@ Required JSON Structure:
   ]
 }}}}
 
-Query the database for real hotels and spots using the provided tools.
 Context: User Prompt: "{req.userPrompt}"
 """
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("user", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ])
-
-        # 3. Create Agent
-        from langchain_core.runnables import RunnablePassthrough
-        logger.info(f"Creating Agent. LLM: {type(self.llm)}, Tools: {len(tools)}, Prompt: {type(prompt)}")
-        
-        # Verify LLM
-        if self.llm is None:
-             logger.error("CRITICAL: self.llm is None before agent creation")
-             return {"error": "LLM configuration failed"}
-
-        # Bind tools
-        try:
-            llm_with_tools = self.llm.bind_tools(tools)
-        except Exception as e:
-            logger.error(f"Failed to bind tools: {e}")
-            return {"error": f"Tool binding failed: {e}"}
-            
-        # Define Agent Chain (Deconstructed for Debugging)
-        try:
-            from langchain_core.runnables import RunnableLambda
-            
-            def prepare_agent_inputs(x):
-                # Manual assignment of scratchpad to bypass RunnablePassthrough.assign issues
-                x = x.copy()
-                x["agent_scratchpad"] = format_to_openai_tool_messages(x["intermediate_steps"])
-                return x
-
-            step1 = RunnableLambda(prepare_agent_inputs)
-            step2 = prompt
-            step3 = llm_with_tools
-            step4 = OpenAIToolsAgentOutputParser()
-            
-            logger.info(f"DEBUG Chain Components: Step1={type(step1)}, Step2={type(step2)}, Step3={type(step3)}, Step4={type(step4)}")
-            
-            agent = step1 | step2 | step3 | step4
-        except Exception as e:
-            logger.error(f"Chain construction failed: {e}")
-            return {"error": f"Agent construction failed: {e}"}
-        
-        agent_executor = AgentExecutor(
-            agent=agent, 
-            tools=tools, 
-            verbose=True,
-            handle_parsing_errors=True,
-            max_iterations=8
-        )
-        
-        # 4. Execute
-        try:
-            logger.info("Starting LangChain Agent Execution...")
-            result = agent_executor.invoke({"input": "Please generate the itinerary JSON."})
-            output_str = result.get("output", "")
-            
-            # 5. Extract JSON safely
-            # Sometimes LangChain returns text with ```json block
             try:
-                # Naive cleanup
-                clean_json = output_str.strip()
-                if "```json" in clean_json:
-                    clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-                elif "```" in clean_json:
-                    clean_json = clean_json.split("```")[1].strip()
-                
+                response = self.llm.invoke(
+                    [
+                        SystemMessage(content=system_prompt),
+                        HumanMessage(content="Please generate the itinerary JSON.")
+                    ]
+                )
+                output_str = getattr(response, "content", "")
+            except Exception as exc:
+                return {**state, "error": str(exc), "itinerary": []}
+
+            clean_json = output_str.strip()
+            if "```json" in clean_json:
+                clean_json = clean_json.split("```json")[1].split("```")[0].strip()
+            elif "```" in clean_json:
+                clean_json = clean_json.split("```")[1].strip()
+
+            try:
                 data = json.loads(clean_json)
-                return data
+                itinerary = data.get("itinerary", []) if isinstance(data, dict) else data
+                return {**state, "itinerary": itinerary, "error": None}
             except json.JSONDecodeError:
-                logger.error(f"Failed to parse LangChain output JSON: {output_str}")
-                return {"error": "Failed to parse JSON from AI", "raw": output_str}
+                logger.error(f"Failed to parse AI output JSON: {output_str}")
+                return {**state, "error": "Failed to parse JSON from AI", "itinerary": []}
 
-        except Exception as e:
-            logger.error(f"LangChain Execution Error: {e}")
-            return {"error": str(e)}
+        def validate_plan(state: AgentState) -> AgentState:
+            if state.get("error"):
+                return state
+            try:
+                adapter = TypeAdapter(List[ItineraryItem])
+                validated = adapter.validate_python(state.get("itinerary", []))
+                return {**state, "itinerary": [item.model_dump() for item in validated]}
+            except ValidationError:
+                return {**state, "error": "Validation failed", "itinerary": []}
 
+        graph = StateGraph(AgentState)
+        graph.add_node("fetch_resources", fetch_resources)
+        graph.add_node("generate_plan", generate_plan)
+        graph.add_node("validate_plan", validate_plan)
+        graph.set_entry_point("fetch_resources")
+        graph.add_edge("fetch_resources", "generate_plan")
+        graph.add_edge("generate_plan", "validate_plan")
+        graph.add_edge("validate_plan", END)
+        app = graph.compile()
+
+        initial_state: AgentState = {
+            "req": req,
+            "hotels": [],
+            "spots": [],
+            "itinerary": [],
+            "error": None,
+        }
+        result = app.invoke(initial_state)
+        return {
+            "itinerary": result.get("itinerary", []),
+            "error": result.get("error"),
+        }

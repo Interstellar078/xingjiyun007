@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
     Plus, Trash2, Save, FolderOpen, Sparkles, Database,
     Calendar, MapPin, Clock, X, FileUp, PlusCircle,
@@ -59,6 +59,7 @@ export function PlannerViewOriginal({
     const [showAIModal, setShowAIModal] = useState(false);
     const [aiPromptInput, setAiPromptInput] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
+    const [aiError, setAiError] = useState<string | null>(null);
 
     // Chat State
     const [chatHistory, setChatHistory] = useState<{ type: 'user' | 'ai'; text: string }[]>([]);
@@ -165,9 +166,19 @@ export function PlannerViewOriginal({
 
     // --- AI Generator Handler ---
     // --- AI Generator Handler ---
+    const availableCountries = useMemo(
+        () => Array.from(new Set(cloudData.poiCities.map(c => c.country).filter(Boolean))),
+        [cloudData.poiCities]
+    );
+
     const handleSendChat = async (manualMsg?: string) => {
         const textToSend = typeof manualMsg === 'string' ? manualMsg : aiPromptInput;
         if (!textToSend.trim()) return;
+        if (!settings.destinations?.length) {
+            setAiError('请先在上方选择目的地国家/城市');
+            return;
+        }
+        setAiError(null);
 
         setIsGenerating(true);
         // Add User Message
@@ -179,22 +190,31 @@ export function PlannerViewOriginal({
         const currentPrompt = textToSend;
 
         try {
-            const availableCountries = Array.from(new Set(cloudData.poiCities.map(c => c.country).filter(Boolean)));
-
+            const compactRows = rows
+                .filter(r => r.route)
+                .map(r => ({
+                    date: r.date,
+                    route: r.route,
+                    transport: r.transport,
+                    hotelName: r.hotelName,
+                    ticketName: r.ticketName,
+                    activityName: r.activityName,
+                    description: r.description
+                }));
             // Build Context Payload
             const payload = {
                 currentDestinations: settings.destinations || [],
                 currentDays: rows.length,
                 availableCountries: availableCountries as string[],
                 userPrompt: currentPrompt,
-                currentRows: rows.filter(r => r.route),
+                currentRows: compactRows,
                 historyTrips: [], // Required by backend schema
             };
 
             // request from aiApi directly
             const res = await aiApi.generateItinerary(payload);
 
-            if (res.itinerary && Array.isArray(res.itinerary)) {
+            if (res.itinerary && Array.isArray(res.itinerary) && res.itinerary.length > 0) {
                 // Map response to rows
                 const newRows: DayRow[] = res.itinerary.map((item: any, idx: number) => ({
                     id: `day-${Date.now()}-${idx}`, // Generate unique ID
@@ -232,6 +252,7 @@ export function PlannerViewOriginal({
         } catch (error) {
             console.error("AI Generation Failed:", error);
             setChatHistory(prev => [...prev, { type: 'ai', text: '生成失败，请检查网络或配置。' }]);
+            setAiError('AI 生成失败，请稍后重试或检查配置');
         } finally {
             setIsGenerating(false);
         }
@@ -330,7 +351,7 @@ export function PlannerViewOriginal({
                     <GlobalSettings
                         settings={settings}
                         updateSettings={(s) => setSettings(prev => ({ ...prev, ...s }))}
-                        availableCountries={Array.from(new Set(cloudData.poiCities.map(c => c.country).filter(Boolean))) as string[]}
+                        availableCountries={availableCountries as string[]}
                         validationErrors={validationErrors}
                         tripDays={rows.length}
                         onTripDaysChange={handleDaysChange}
@@ -571,9 +592,10 @@ export function PlannerViewOriginal({
                                 className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none h-32"
                                 placeholder="输入您的要求..."
                             />
+                            {aiError && <div className="text-xs text-red-500">{aiError}</div>}
                             <button
                                 onClick={() => handleSendChat()}
-                                disabled={isGenerating}
+                                disabled={isGenerating || !aiPromptInput.trim()}
                                 className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
                             >
                                 {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UserOut(BaseModel):
@@ -70,8 +70,27 @@ class ItineraryRequest(BaseModel):
     userPrompt: str | None = None
 
 
+class ItineraryItem(BaseModel):
+    day: int | None = None
+    date: str | None = None
+    route: str | None = None
+    s_city: str | None = None
+    e_city: str | None = None
+    transport: list[str] = Field(default_factory=list)
+    hotelName: str | None = None
+    hotelCost: float | int | None = None
+    ticketName: list[str] = Field(default_factory=list)
+    ticketCost: float | int | None = None
+    activityName: list[str] = Field(default_factory=list)
+    activityCost: float | int | None = None
+    description: str | None = None
+    rooms: int | None = None
+    transportCost: float | int | None = None
+    otherCost: float | int | None = None
+
+
 class ItineraryResponse(BaseModel):
     detectedDestinations: list[str]
-    itinerary: list[dict]
+    itinerary: list[ItineraryItem]
     reasoning: str | None = None
     error: str | None = None

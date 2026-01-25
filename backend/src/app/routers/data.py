@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/data", tags=["data"])
 @router.get("/{key}", response_model=DataItem)
 def get_data(
     key: str, 
-    scope: Optional[str] = Query(None, regex="^(private|public)$"),
+    scope: Optional[str] = Query(None, pattern="^(private|public)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> DataItem:
@@ -154,7 +154,7 @@ def delete_data(
 
 @router.get("", response_model=list[DataItem])
 def list_all(
-    scope: Optional[str] = Query("all", regex="^(all|private|public)$"),
+    scope: Optional[str] = Query("all", pattern="^(all|private|public)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> list[DataItem]:

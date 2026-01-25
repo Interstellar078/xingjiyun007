@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import logging
 
-from ..auth import create_access_token, hash_password, verify_password
+from ..auth import create_access_token, hash_password, verify_password, _password_too_long
 from ..deps import get_db, get_current_user
 from ..models import User
 from ..schemas import AuthResponse, LoginRequest, RegisterRequest, UserOut
@@ -25,6 +25,9 @@ def _to_user_out(user: User) -> UserOut:
 @router.post("/register", response_model=AuthResponse)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
     try:
+        if _password_too_long(payload.password):
+            return AuthResponse(success=False, message="密码长度过长，请控制在 72 字节以内")
+
         existing = db.query(User).filter(User.username == payload.username).first()
         if existing:
             return AuthResponse(success=False, message="用户名已存在")
@@ -48,6 +51,9 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
 
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
+    if _password_too_long(payload.password):
+        return AuthResponse(success=False, message="用户名或密码错误")
+
     user = db.query(User).filter(User.username == payload.username).first()
     if not user or not verify_password(payload.password, user.password_hash):
         return AuthResponse(success=False, message="用户名或密码错误")
