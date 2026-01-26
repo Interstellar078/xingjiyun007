@@ -166,10 +166,11 @@ export function PlannerViewOriginal({
 
     // --- AI Generator Handler ---
     // --- AI Generator Handler ---
-    const availableCountries = useMemo(
-        () => Array.from(new Set(cloudData.poiCities.map(c => c.country).filter(Boolean))),
-        [cloudData.poiCities]
-    );
+    const availableCountries = useMemo(() => {
+        const fromCities = Array.from(new Set(cloudData.poiCities.map(c => c.country).filter(Boolean)));
+        if (fromCities.length > 0) return fromCities;
+        return Array.from(new Set(settings.destinations || []));
+    }, [cloudData.poiCities, settings.destinations]);
 
     const handleSendChat = async (manualMsg?: string) => {
         const textToSend = typeof manualMsg === 'string' ? manualMsg : aiPromptInput;
@@ -411,10 +412,19 @@ export function PlannerViewOriginal({
                                             <td className="px-2 py-2 align-top">
                                                 <div className="flex items-center gap-1">
                                                     <div className="flex-1">
-                                                        <MultiSelect
-                                                            options={cloudData.poiCities.filter(c => settings.destinations.length === 0 || settings.destinations.includes(c.country)).map(c => c.name)}
+                                                        <AsyncMultiSelect
                                                             value={extractCitiesFromRoute(row.route)}
                                                             onChange={(val) => handleRouteUpdate(index, val)}
+                                                            fetchOptions={async (q) => {
+                                                                const countryFilter = settings.destinations.length === 1 ? settings.destinations[0] : undefined;
+                                                                const res = await resourceApi.listCities({
+                                                                    country: countryFilter,
+                                                                    search: q,
+                                                                    size: 50
+                                                                });
+                                                                return res.map(c => c.name);
+                                                            }}
+                                                            dependencies={[settings.destinations.join(',')]}
                                                             placeholder="选择路线..."
                                                             className="text-xs border-transparent hover:bg-gray-50 rounded"
                                                             displaySeparator="-"

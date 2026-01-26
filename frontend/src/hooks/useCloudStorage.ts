@@ -44,6 +44,7 @@ import { User } from '../types';
 export function useCloudStorage(currentUser: User | null) {
     const [isAppLoading, setIsAppLoading] = useState(true);
     const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
+    const [resourcesLoaded, setResourcesLoaded] = useState(false);
 
     // Data state
     const [carDB, setCarDB] = useState<CarCostEntry[]>([]);
@@ -78,26 +79,12 @@ export function useCloudStorage(currentUser: User | null) {
     };
 
     // Load data from cloud
-    const loadCloudData = async (userOverride?: User) => {
+    const loadCoreData = async (userOverride?: User) => {
         const activeUser = userOverride || currentUser;
         if (!activeUser) return;
 
         try {
             StorageService.ensureAdminProfile(); // No-op but keeps flow
-
-            const isAdmin = activeUser.role === 'admin';
-            let cars, cities, spots, hotels, activities, files;
-
-            // Use New Resource API for everyone (it handles scope/merging backend side)
-            // Fetch everything with large page size to emulate "loading all data" for Planner Context
-            [cars, cities, spots, hotels, activities] = await Promise.all([
-                resourceApi.listTransports({ size: 2000 }),
-                resourceApi.listCities({ size: 2000 }),
-                resourceApi.listSpots({ size: 2000 }),
-                resourceApi.listHotels({ size: 2000 }),
-                resourceApi.listActivities({ size: 2000 }),
-            ]);
-            files = []; // Files deprecated or moved to new system later
 
             // Non-resource data (Trips, Settings) are always private/scoped natively by overlay
             const [trips, pubTrips, locs, settings] = await Promise.all([
@@ -107,12 +94,6 @@ export function useCloudStorage(currentUser: User | null) {
                 StorageService.getAppSettings()
             ]);
 
-            setCarDB(cars);
-            setPoiCities(cities);
-            setPoiSpots(spots);
-            setPoiHotels(hotels);
-            setPoiActivities(activities);
-            setCountryFiles(files);
             setSavedTrips(trips);
             setPublicTrips(pubTrips);
             setLocationHistory(locs);
@@ -125,6 +106,32 @@ export function useCloudStorage(currentUser: User | null) {
         } catch (e) {
             console.error("Load failed", e);
             setCloudStatus('error');
+        }
+    };
+
+    const loadResourceData = async (userOverride?: User) => {
+        const activeUser = userOverride || currentUser;
+        if (!activeUser) return;
+        if (resourcesLoaded) return;
+
+        try {
+            const [cars, cities, spots, hotels, activities] = await Promise.all([
+                resourceApi.listTransports({ size: 2000 }),
+                resourceApi.listCities({ size: 2000 }),
+                resourceApi.listSpots({ size: 2000 }),
+                resourceApi.listHotels({ size: 2000 }),
+                resourceApi.listActivities({ size: 2000 }),
+            ]);
+
+            setCarDB(cars);
+            setPoiCities(cities);
+            setPoiSpots(spots);
+            setPoiHotels(hotels);
+            setPoiActivities(activities);
+            setCountryFiles([]);
+            setResourcesLoaded(true);
+        } catch (e) {
+            console.error("Resource load failed", e);
         }
     };
 
@@ -169,7 +176,9 @@ export function useCloudStorage(currentUser: User | null) {
         isAppLoading,
         setIsAppLoading,
         cloudStatus,
-        loadCloudData,
+        resourcesLoaded,
+        loadCoreData,
+        loadResourceData,
         data: {
             carDB,
             poiCities,
